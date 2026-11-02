@@ -1,0 +1,1 @@
+Application icon for PDF Assignment Marker v11.0.0. PNG has a transparent background. Multi-resolution Windows ICO generated from the approved icon image. Use the .ico for Windows executable, shortcuts and installer.

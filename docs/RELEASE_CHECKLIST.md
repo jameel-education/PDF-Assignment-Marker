@@ -1,0 +1,21 @@
+# Final Windows release checks (not yet completed)
+
+- [x] Last tested Python upload included without modifications as ORIGINAL_LAST_TESTED_UNMODIFIED.py.
+- [x] Release source parses as Python syntax.
+- [x] About footer, startup title and source metadata updated for v11.0.0.
+- [x] Approved project icon provided as assets/PDF_Assignment_Marker.ico.
+- [x] Full AGPL-3.0 COPYING text included.
+- [ ] All dependency copyright/licence notices collected and reviewed for Windows distribution.
+- [ ] Windows dependencies installed and application launched with no errors.
+- [ ] About shows Version 11.0.0, project credit, affiliation disclaimer and AI acknowledgement.
+- [ ] English/Dhivehi RTL and LTR annotation tested live and after save/reopen.
+- [ ] Open/Save/Save As, overwrite safety, cancel/failed save, open invalid PDFs.
+- [ ] Single/Split, independent scroll/zoom, 350% zoom limit, large PDF loading.
+- [ ] All tools, part marks, totals, undo/redo and both documents.
+- [ ] Rotation, export Image PDF, Combine PDF and signatures.
+- [ ] Packaged exe and portable ZIP tested on clean Windows machine.
+- [ ] Installer built using Inno Setup, uninstaller and no-admin install tested.
+- [ ] Verify no Windows SmartScreen or antivirus false-positive without claiming certification.
+- [ ] Installer metadata, About, folder and docs all show the same v11.0.0.
+- [ ] Generate release SHA256 hashes for installer and portable ZIP.
+- [ ] Release publicly only after all required validations pass.
