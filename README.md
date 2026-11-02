@@ -6,7 +6,40 @@ Free, offline Windows software for opening, annotating and marking PDF documents
 
 ## Release status
 
-This is a **source release candidate**, based on the last Python file supplied and user-tested, `pdf_assignment_marker(6).py`. Only the version and experimental window title were updated in the release copy; the original file is preserved in `source/ORIGINAL_LAST_TESTED_UNMODIFIED.py`. The About dialog is **v11.0.0 (2026)**. The user has tested earlier Windows builds. This final build revision has **not** been compiled or tested on Windows in this environment; the latest changes are packaging only.
+PDF Assignment Marker v11.0.0 — First Public Release (2026)
+
+PDF Assignment Marker v11.0.0 has been publicly released as free, open-source Windows software. The application has undergone functional testing and release validation on Windows 11 (64-bit).
+
+The following checks have been completed successfully:
+
+- PDF annotation and marking tools.
+
+- Single View and Split View functionality.
+
+- English and Dhivehi text entry.
+
+- Part Marks and automatic Total Marks calculation.
+
+- Save, Save As, and PDF export.
+
+- Windows installer installation and application startup.
+
+- Portable edition extraction and application startup.
+  
+- Application icon and About version verification.
+
+- Windows uninstallation.
+
+- AVG antivirus scan reported no threats during testing.
+
+Windows 10 (64-bit) is expected to be compatible but has not yet been tested.
+
+These results reflect development and release testing and do not constitute certification for every Windows computer or configuration.
+
+## Download the latest release:
+https://github.com/jameel-education/PDF-Assignment-Marker/releases/tag/v11.0.0
+
+Bug reports and community contributions are welcome through GitHub Issues.
 
 ## Run from source (Windows)
 
