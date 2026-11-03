@@ -4,6 +4,12 @@ Free, offline Windows software for opening, annotating and marking PDF documents
 
 **Project initiator and developer:** Mohamed Jameel, Faculty of Education, The Maldives National University. Independent voluntary project; the affiliation does not imply institutional endorsement. Developed with assistance from AI-based programming tools.
 
+## User Guide
+
+An illustrated guide to installation, PDF marking, Split View, saving documents, and uninstallation.
+
+📖 [Download the PDF Assignment Marker User Guide](docs/PDF_Assignment_Marker_v11_User_Guide.pdf)
+
 ## Release status
 
 PDF Assignment Marker v11.0.0 — First Public Release (2026)
