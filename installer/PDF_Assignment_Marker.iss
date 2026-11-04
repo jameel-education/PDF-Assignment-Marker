@@ -1,5 +1,5 @@
 #define AppName "PDF Assignment Marker"
-#define AppVersion "11.0.0"
+#define AppVersion "11.0.1"
 #define AppPublisher "Mohamed Jameel"
 [Setup]
 AppId={{B8C21934-103D-4516-AD34-5BE77C5B52CC}
@@ -10,7 +10,7 @@ DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 PrivilegesRequired=lowest
 OutputDir=..\release
-OutputBaseFilename=PDF_Assignment_Marker_v11.0.0_Windows_Setup
+OutputBaseFilename=PDF_Assignment_Marker_v11.0.1_Windows_Setup
 Compression=lzma2
 SolidCompression=yes
 UninstallDisplayIcon={app}\PDF Assignment Marker.exe
