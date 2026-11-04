@@ -1777,6 +1777,10 @@ class App(QMainWindow):
         self._max_cached_pages = 16
         self._building_pages = {"student": False, "rubric": False}
         self._preview_pending = {"student": False, "rubric": False}
+        # Short-lived scaled page previews keep fast repeated zoom operations
+        # visually stable. Render exact-resolution images after zoom input settles.
+        self._zoom_preview_pages = {'student': set(), 'rubric': set()}
+        self._zoom_settle_timers = {}
         self.make_ui();self.add_keyboard_shortcuts();self.update_actions();self.refresh_page_navigation()
         self.statusBar().showMessage('Open a PDF to begin marking with a pen, stylus or mouse.')
         # Prepare the emoji dialog once after the main window appears, so its
@@ -2427,6 +2431,20 @@ class App(QMainWindow):
         self.rubric_stack_layout.addWidget(self.ref_image,0,Qt.AlignmentFlag.AlignHCenter)
         self.ref_scroll.setWidgetResizable(True)
         self.ref_scroll.setWidget(self.rubric_stack);ref_layout.addWidget(self.ref_scroll,1)
+        # Layout regression test: oversized PDF pages must remain inside their
+        # own scrolling viewport, never expanding one Split View workspace.
+        for workspace, scroll_area in ((self.reference_panel, self.ref_scroll),
+                                       (self.student_workspace, self.scroll)):
+            workspace.setMinimumWidth(0)
+            workspace.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                    QSizePolicy.Policy.Expanding)
+            scroll_area.setMinimumWidth(0)
+            scroll_area.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                      QSizePolicy.Policy.Expanding)
+        for page_stack in (self.rubric_stack, self.student_stack):
+            page_stack.setMinimumWidth(0)
+            page_stack.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                     QSizePolicy.Policy.Preferred)
         ref_layout.addWidget(rubric_nav_bar)
         self.ref_scroll.viewport().installEventFilter(self)
         self.ref_scroll.verticalScrollBar().valueChanged.connect(self.sync_rubric_scroll)
@@ -4029,6 +4047,11 @@ class App(QMainWindow):
         self._sync_thumbnail_selection()
 
     def _clear_page_stack(self, layout):
+        # Release the previous document's horizontal extent before rebuilding.
+        # The outer PDF viewport remains free to shrink in Split View.
+        owner = layout.parentWidget()
+        if owner is not None:
+            owner.setMinimumWidth(0)
         while layout.count():
             item=layout.takeAt(0)
             w=item.widget()
@@ -4036,6 +4059,20 @@ class App(QMainWindow):
                 if hasattr(w,'finish_editor'):w.finish_editor()
                 w.setParent(None)
                 w.deleteLater()
+
+    def _update_page_stack_width(self, side):
+        """Keep oversized page widths scrollable, not transferred to the pane.
+
+        QScrollArea stays widget-resizable as in the original working renderer.
+        A minimum width on its INNER page stack gives the horizontal scrollbar
+        a real scroll range, while the outer scroll area keeps Ignored sizing.
+        No page pixmaps, visibility calculations or render schedules change.
+        """
+        stack = self.rubric_stack if side == 'rubric' else self.student_stack
+        canvases = self.rubric_pages if side == 'rubric' else self.student_pages
+        # The two inner page layouts have 12px left and right margins.
+        required = max((page.width() for page in canvases), default=0)
+        stack.setMinimumWidth(required + 24 if required else 0)
 
     def _visible_pdf_pages(self, scroll, canvases):
         """Return pages near the viewport, avoiding rasterization of offscreen pages."""
@@ -4142,7 +4179,9 @@ class App(QMainWindow):
         if side == 'student':
             if index < len(self.student_pages):
                 canvas = self.student_pages[index]
-                if canvas.paper.isNull() or (index == 0 and self._preview_pending["student"]):
+                if (canvas.paper.isNull() or index in self._zoom_preview_pages['student']
+                        or (index == 0 and self._preview_pending["student"])):
+                    self._zoom_preview_pages['student'].discard(index)
                     self._preview_pending["student"] = False
                     canvas.paper = QPixmap.fromImage(image)
                     canvas.update()
@@ -4150,25 +4189,142 @@ class App(QMainWindow):
         else:
             if index < len(self.rubric_pages):
                 canvas = self.rubric_pages[index]
-                if canvas.pixmap().isNull() or (index == 0 and self._preview_pending["rubric"]):
+                if (canvas.pixmap().isNull() or index in self._zoom_preview_pages['rubric']
+                        or (index == 0 and self._preview_pending["rubric"])):
+                    self._zoom_preview_pages['rubric'].discard(index)
                     self._preview_pending["rubric"] = False
                     canvas.setPixmap(QPixmap.fromImage(image))
                     self._remember_rendered_page('rubric', index)
 
+    def _zoom_existing_pages(self, side):
+        """Retain the existing page stack during zoom; never flash/rebuild it.
+
+        Only a fully populated stack is eligible. Initial document loading and
+        page rotation continue to use the original incremental render path.
+        Previous images serve as temporary scaled previews of visible pages.
+        """
+        rubric = side == 'rubric'
+        doc = self.rubric_doc if rubric else self.doc
+        pages = self.rubric_pages if rubric else self.student_pages
+        if (not doc or len(pages) != len(doc) or not pages
+                or self._building_pages[side]):
+            return False
+        scroll = self.ref_scroll if rubric else self.scroll
+        stack = self.rubric_stack if rubric else self.student_stack
+        zoom = self.ref_zoom if rubric else self.zoom
+        active_index = min(len(pages) - 1,
+                           self.rubric_page if rubric else self.page_index)
+        # Save the viewport's relative position within the active page before
+        # changing geometry, including when the book has mixed page sizes.
+        old_scroll = scroll.verticalScrollBar().value()
+        anchor = min(range(len(pages)), key=lambda i:
+                     abs(pages[i].y() - old_scroll))
+        old_page = pages[anchor]
+        old_fraction = ((old_scroll - old_page.y()) /
+                        max(1, old_page.height()))
+        visible_before = set(self._visible_pdf_pages(scroll, pages))
+        keep = visible_before | {anchor, active_index}
+        self._cancel_background_render(side)
+        generation = self._render_generation[side]
+        self._zoom_preview_pages[side].clear()
+        scroll.setUpdatesEnabled(False)
+        stack.setUpdatesEnabled(False)
+        try:
+            for i, canvas in enumerate(pages):
+                page = doc[i]
+                new_scale = zoom
+                if rubric:
+                    canvas.scale = new_scale
+                width = max(1, round(page.rect.width * new_scale))
+                height = max(1, round(page.rect.height * new_scale))
+                old_pix = canvas.pixmap() if rubric else canvas.paper
+                # Keep previews only around the viewport to bound image memory.
+                if i in keep and old_pix is not None and not old_pix.isNull():
+                    preview = old_pix.scaled(width, height,
+                        Qt.AspectRatioMode.IgnoreAspectRatio,
+                        Qt.TransformationMode.FastTransformation)
+                    if rubric:
+                        # Do not call RubricCanvas.setPixmap: it finishes editing.
+                        QLabel.setPixmap(canvas, preview)
+                    else:
+                        canvas.paper = preview
+                    self._zoom_preview_pages[side].add(i)
+                else:
+                    if rubric:
+                        QLabel.setPixmap(canvas, QPixmap())
+                    else:
+                        canvas.paper = QPixmap()
+                canvas.setFixedSize(width, height)
+            # Preserve a horizontal scroll range at the new magnification.
+            self._update_page_stack_width(side)
+            stack.layout().activate()
+            page = pages[anchor]
+            new_scroll = page.y() + round(old_fraction * page.height())
+            scroll.verticalScrollBar().setValue(max(0, new_scroll))
+        finally:
+            stack.setUpdatesEnabled(True)
+            scroll.setUpdatesEnabled(True)
+            scroll.viewport().update()
+        # A separate timer for each PDF pane; resetting it does not make the
+        # zoom itself sluggish. Toolbar and wheel zoom both use this method.
+        timer = self._zoom_settle_timers.get(side)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            self._zoom_settle_timers[side] = timer
+            timer.timeout.connect(lambda k=side: self._finish_zoom_preview(k))
+        timer.start(130)
+        return True
+
+    def _finish_zoom_preview(self, side):
+        """Replace viewport previews with current-scale page images only."""
+        rubric = side == 'rubric'
+        doc = self.rubric_doc if rubric else self.doc
+        pages = self.rubric_pages if rubric else self.student_pages
+        if not doc or not pages or self._building_pages[side]:
+            return
+        scroll = self.ref_scroll if rubric else self.scroll
+        visible = self._visible_pdf_pages(scroll, pages)
+        # Pages with no cached image are synchronously rendered on demand;
+        # existing low-resolution previews are upgraded on the background thread.
+        if rubric:
+            self._render_visible_rubric_pages()
+        else:
+            self._render_visible_student_pages()
+        preview = self._zoom_preview_pages[side]
+        candidates = [i for i in visible if i in preview]
+        if candidates:
+            path = self.rubric_path if rubric else self.path
+            scale = self.ref_zoom if rubric else self.zoom
+            self._launch_background_render(side, path, scale, candidates)
+        else:
+            self._start_rubric_prefetch() if rubric else self._start_student_prefetch()
+
     def _start_student_prefetch(self):
         if not self.doc or not self.student_pages or self._building_pages["student"]:
             return
+        timer = self._zoom_settle_timers.get('student')
+        if timer is not None and timer.isActive():
+            return
         self._render_visible_student_pages()
-        pending = self._nearby_pending_pages('student')
-        self._launch_background_render('student', self.path, self.zoom, pending)
+        pending = (list(i for i in self._visible_pdf_pages(self.scroll, self.student_pages)
+                        if i in self._zoom_preview_pages['student'])
+                   + self._nearby_pending_pages('student'))
+        self._launch_background_render('student', self.path, self.zoom,
+                                       list(dict.fromkeys(pending)))
 
     def _start_rubric_prefetch(self):
         if not self.rubric_doc or not self.rubric_pages or self._building_pages["rubric"]:
             return
+        timer = self._zoom_settle_timers.get('rubric')
+        if timer is not None and timer.isActive():
+            return
         self._render_visible_rubric_pages()
-        pending = self._nearby_pending_pages('rubric')
+        pending = (list(i for i in self._visible_pdf_pages(self.ref_scroll, self.rubric_pages)
+                        if i in self._zoom_preview_pages['rubric'])
+                   + self._nearby_pending_pages('rubric'))
         self._launch_background_render('rubric', self.rubric_path,
-                                       self.ref_zoom, pending)
+                                       self.ref_zoom, list(dict.fromkeys(pending)))
 
     def sync_student_scroll(self, value):
         if not self.doc or not self.student_pages:return
@@ -4219,6 +4375,7 @@ class App(QMainWindow):
                             max(1,round(page.rect.height*scale)))
         self.rubric_stack_layout.addWidget(canvas,0,Qt.AlignmentFlag.AlignHCenter)
         self.rubric_pages.append(canvas)
+        self._update_page_stack_width('rubric')
         return canvas
 
     def _continue_rubric_pages(self, generation):
@@ -4239,6 +4396,7 @@ class App(QMainWindow):
 
     def render_rubric(self):
         if not self.rubric_doc:return
+        self._zoom_preview_pages['rubric'].clear()
         self._cancel_background_render('rubric')
         self._building_pages['rubric']=True
         self._preview_pending['rubric']=False
@@ -4247,6 +4405,8 @@ class App(QMainWindow):
         canvas=self._rubric_canvas_for_page(0)
         self.ref_image=canvas
         self.ref_zoom_label.setText(f'{round(canvas.scale*100)}%');self._refresh_shared_header()
+        if self.split_mode:
+            QTimer.singleShot(0, self.center_tools_panel)
         if self.rubric_page==0:
             try:
                 preview_scale=min(canvas.scale,.55)
@@ -4409,6 +4569,13 @@ class App(QMainWindow):
             canvas.setPixmap(qt_pixmap(page, scale))
             self.ref_image = canvas
         self._remember_rendered_page(side, index)
+        # Rotation changes the widest page in the stack. Recalculate the INNER
+        # stack width just as zoom does, so the horizontal scrollbar updates
+        # for landscape/portrait orientations without resizing the PDF pane.
+        self._update_page_stack_width(side)
+        stack = self.rubric_stack if side == 'rubric' else self.student_stack
+        stack.layout().invalidate()
+        stack.layout().activate()
         # Keep this same page on screen after its dimensions change.
         scroll.verticalScrollBar().setValue(canvas.y())
         self.refresh_page_navigation()
@@ -4647,7 +4814,11 @@ class App(QMainWindow):
             self.ref_zoom=min(3.50,max(.3,(self.ref_scroll.viewport().width()-20)/page.rect.width))
         self.ref_auto_fit=False
         self.ref_zoom=max(.3,min(3.50,self.ref_zoom*factor))
-        self.render_rubric()
+        if not self._zoom_existing_pages('rubric'):
+            self.render_rubric()
+        else:
+            self.ref_zoom_label.setText(f'{round(self.ref_zoom*100)}%')
+            self._refresh_shared_header()
 
 
     def open_pdf(self, path=None, skip_unsaved_prompt=False):
@@ -4804,6 +4975,7 @@ class App(QMainWindow):
                             max(1, round(page.rect.height*self.zoom)))
         self.student_stack_layout.addWidget(canvas, 0, Qt.AlignmentFlag.AlignHCenter)
         self.student_pages.append(canvas)
+        self._update_page_stack_width('student')
         return canvas
 
     def _continue_student_pages(self, generation):
@@ -4824,6 +4996,7 @@ class App(QMainWindow):
 
     def render(self):
         if not self.doc:return
+        self._zoom_preview_pages['student'].clear()
         self._cancel_background_render('student')
         self._building_pages['student'] = True
         self._preview_pending['student'] = False
@@ -4836,6 +5009,8 @@ class App(QMainWindow):
         canvas = self._student_canvas_for_page(0)
         self.canvas = canvas
         self.student_zoom_label.setText(f'{round(self.zoom*100)}%');self._refresh_shared_header()
+        if self.split_mode:
+            QTimer.singleShot(0, self.center_tools_panel)
         if self.page_index == 0:
             try:
                 preview_scale = min(self.zoom, .55)
@@ -4898,7 +5073,9 @@ class App(QMainWindow):
     def set_zoom(self,z,auto_fit=False):
         if not self.doc:return
         self.student_auto_fit_width=auto_fit
-        self.zoom=max(.3,min(3.50,z));self.render()
+        self.zoom=max(.3,min(3.50,z))
+        if not self._zoom_existing_pages('student'):
+            self.render()
         self.student_zoom_label.setText(f'{round(self.zoom*100)}%');self._refresh_shared_header()
     def fit_width(self):
         if self.doc:self.set_zoom((self.scroll.viewport().width()-12)/self.doc[self.page_index].rect.width,auto_fit=True)
