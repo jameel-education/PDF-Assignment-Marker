@@ -1,4 +1,6 @@
-# PDF Assignment Marker v11.0.0
+# PDF Assignment Marker v11.0.1 - Maintenance Update
+
+This release corrects PDF display, zooming, horizontal scrolling, and page rotation issues without introducing new features.
 
 Free, offline Windows software for opening, annotating and marking PDF documents. A teacher can use single or split view, use PDF annotation tools, place part marks and totals, and export marked or flattened PDFs. English and Dhivehi text supported with Windows fonts.
 
@@ -11,6 +13,8 @@ An illustrated guide to installation, PDF marking, Split View, saving documents,
 📖 [Download the PDF Assignment Marker User Guide](docs/PDF_Assignment_Marker_v11_User_Guide.pdf)
 
 ## Release status
+
+PDF Assignment Marker v11.0.1 — Maintenance Update (2026)
 
 PDF Assignment Marker v11.0.0 — First Public Release (2026)
 
