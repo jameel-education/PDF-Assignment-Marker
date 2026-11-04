@@ -1,4 +1,4 @@
-"""PDF Assignment Marker 11.0.0 — offline Windows PDF annotation, PySide6 and PyMuPDF.
+"""PDF Assignment Marker 11.0.1 — offline Windows PDF annotation, PySide6 and PyMuPDF.
 
 Strokes remain editable during this session; saving creates a new annotated PDF.
 """
@@ -3170,7 +3170,7 @@ class App(QMainWindow):
         note.setWordWrap(True)
         text_layout.addWidget(note)
         text_layout.addStretch(1)
-        meta = QLabel('Version 11.0.0  •  2026  •  Mohamed Jameel')
+        meta = QLabel('Version 11.0.1  •  2026  •  Mohamed Jameel')
         meta.setObjectName('aboutMeta')
         text_layout.addWidget(meta)
         area.setWidget(content)
