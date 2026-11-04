@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 echo ========================================================
-echo PDF Assignment Marker v11.0.0 - Windows Release Builder
+echo PDF Assignment Marker v11.0.1 - Windows Release Builder
 echo ========================================================
 if not exist "source\pdf_assignment_marker.py" (echo ERROR: source missing & pause & exit /b 1)
 if not exist "assets\PDF_Assignment_Marker.ico" (echo ERROR: icon missing & pause & exit /b 1)
@@ -22,7 +22,7 @@ if not exist "release" mkdir "release"
 copy /y "COPYING" "dist\PDF Assignment Marker\COPYING" >nul
 copy /y "LICENSE" "dist\PDF Assignment Marker\LICENSE" >nul
 copy /y "docs\THIRD_PARTY_NOTICES.md" "dist\PDF Assignment Marker\THIRD_PARTY_NOTICES.md" >nul
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Force -Path 'dist\PDF Assignment Marker' -DestinationPath 'release\PDF_Assignment_Marker_v11.0.0_Windows_Portable.zip'"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Force -Path 'dist\PDF Assignment Marker' -DestinationPath 'release\PDF_Assignment_Marker_v11.0.1_Windows_Portable.zip'"
 if errorlevel 1 (echo ERROR: Portable ZIP failed & pause & exit /b 1)
 echo.
 echo Portable ZIP created in release folder.
