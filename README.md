@@ -1,4 +1,10 @@
-# PDF Assignment Marker v11.0.1 - Maintenance Update
+# PDF Assignment Marker v11.0.2 - Maintenance Update
+
+## What's New in v11.0.2
+
+Version 11.0.2 introduces a compact, laptop-friendly interface with a Light Blue title bar, streamlined toolbars, more PDF viewing space, improved page navigation, and enhanced Single View and Split View handling.
+
+All existing PDF marking tools and features are retained.
 
 This release corrects PDF display, zooming, horizontal scrolling, and page rotation issues without introducing new features.
 
@@ -13,6 +19,8 @@ An illustrated guide to installation, PDF marking, Split View, saving documents,
 📖 [Download the PDF Assignment Marker User Guide](docs/PDF_Assignment_Marker_v11_User_Guide.pdf)
 
 ## Release status
+
+PDF Assignment Marker v11.0.2 — Compact Interface Update (2026)
 
 PDF Assignment Marker v11.0.1 — Maintenance Update (2026)
 
@@ -47,7 +55,7 @@ Windows 10 (64-bit) is expected to be compatible but has not yet been tested.
 These results reflect development and release testing and do not constitute certification for every Windows computer or configuration.
 
 ## Download the latest release:
-https://github.com/jameel-education/PDF-Assignment-Marker/releases/tag/v11.0.0
+https://github.com/jameel-education/PDF-Assignment-Marker/releases/tag/v11.0.2
 
 Bug reports and community contributions are welcome through GitHub Issues.
 
