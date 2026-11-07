@@ -1,5 +1,27 @@
 # PDF Assignment Marker — Release Notes
 
+## Version 11.0.2 — Compact Interface Update
+
+This release introduces a more compact and professional interface, providing more space for viewing and marking PDF documents.
+
+# Improvements
+
+- Professional Light Blue title bar.
+
+- Compact horizontal and vertical toolbars.
+
+- Larger document viewing area, especially on laptops.
+
+- Improved page navigation and clickable document filenames.
+
+- Improved Single View and Split View document fitting and centring.
+
+- Improved selection, scrolling, and keyboard navigation.
+
+- Improved document rendering and view switching.
+
+- Updated About and Help information.
+
 ## Version 11.0.1 — Maintenance Update
 
 This maintenance release improves PDF viewing, zooming, and scrolling reliability while preserving the existing interface and marking features.
