@@ -1,4 +1,4 @@
-"""PDF Assignment Marker 11.0.1 — offline Windows PDF annotation, PySide6 and PyMuPDF.
+"""PDF Assignment Marker 11.0.2 — offline Windows PDF annotation, PySide6 and PyMuPDF.
 
 Strokes remain editable during this session; saving creates a new annotated PDF.
 """
@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 import io
 import os
 import sys
+import ctypes
 import subprocess
 import tempfile
 from shutil import copyfile as shutil_copy_file
@@ -17,9 +18,9 @@ from pathlib import Path
 from PySide6.QtCore import QTimer, Qt, QPoint, QPointF, QRectF, QSize, Signal, QByteArray, QBuffer, QIODevice, QMimeData, QEvent, QLocale, QSettings, QThread, QObject
 from PySide6.QtGui import QShortcut, QKeySequence, QAction, QColor, QFont, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap, QBrush, QTransform, QDrag, QFontMetricsF, QGuiApplication, QPalette, QTextCursor, QTextOption, QTextDocument, QTextBlockFormat, QSyntaxHighlighter, QTextCharFormat, QTextLayout
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QFrame, QPushButton, QLabel, QFileDialog, QMessageBox, QScrollArea, QMenu,
+    QFrame, QPushButton, QLabel, QLineEdit, QFileDialog, QMessageBox, QScrollArea, QMenu,
     QSlider, QButtonGroup, QToolButton, QSpinBox, QCheckBox, QComboBox,
-    QListWidget, QListWidgetItem, QSplitter, QStatusBar, QSizePolicy, QInputDialog, QTextEdit, QPlainTextEdit, QTextBrowser, QDialog, QGridLayout, QLayout, QGraphicsColorizeEffect)
+    QListWidget, QListWidgetItem, QSplitter, QStatusBar, QSizePolicy, QInputDialog, QTextEdit, QPlainTextEdit, QTextBrowser, QDialog, QGridLayout, QLayout, QGraphicsColorizeEffect, QLineEdit, QAbstractSpinBox)
 import fitz
 from PySide6.QtSvg import QSvgRenderer
 
@@ -606,7 +607,7 @@ class PageCanvas(QWidget):
         self.setAcceptDrops(True)
         self.setMouseTracking(True)
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents,True)
-        self.setCursor(Qt.CursorShape.CrossCursor)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setMinimumSize(300,400)
     def set_page(self, pix):
         self.finish_editor()
@@ -1028,7 +1029,7 @@ class PageCanvas(QWidget):
             self.changed.emit();self.update()
         if self.app.tool=='Move':
             if hasattr(self.app,'drag_origin'):delattr(self.app,'drag_origin')
-            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
     def erase_at(self,pt):
         strokes=self.app.strokes.get(self.page_index,[])
         threshold=self.app.eraser_size/max(self.app.zoom,0.1)/2
@@ -1161,6 +1162,8 @@ class RubricCanvas(QLabel):
         self.drag_stroke=None
         self.resize_signature=None;self.resize_anchor=None
         self.press_pos=None
+        self._pan_origin=None
+        self._pan_scroll_origin=None
         self.editor=None
         self.edit_mark=None
         self.active=None
@@ -1427,10 +1430,24 @@ class RubricCanvas(QLabel):
             elif mark is not None:
                 self.drag_mark=mark
                 self.press_pos=(x,y)
+            else:
+                # Drag unused page space to pan this PDF only.
+                self._pan_origin=e.globalPosition().toPoint()
+                scroll=self.app.ref_scroll
+                self._pan_scroll_origin=(scroll.horizontalScrollBar().value(),
+                                         scroll.verticalScrollBar().value())
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
         elif self.app.tool=='Eraser':
             self.erase_at((x,y))
 
     def mouseMoveEvent(self,e):
+        if (self._pan_origin is not None and self.app.tool == 'Move'
+                and e.buttons() & Qt.MouseButton.LeftButton):
+            delta=e.globalPosition().toPoint()-self._pan_origin
+            scroll=self.app.ref_scroll
+            scroll.horizontalScrollBar().setValue(self._pan_scroll_origin[0]-delta.x())
+            scroll.verticalScrollBar().setValue(self._pan_scroll_origin[1]-delta.y())
+            return
         if self.app.tool == 'Eraser' and self.app.rubric_doc:
             self.eraser_hover=e.position()
             self.update()
@@ -1470,6 +1487,10 @@ class RubricCanvas(QLabel):
             self.update()
 
     def mouseReleaseEvent(self,e):
+        self._pan_origin=None
+        self._pan_scroll_origin=None
+        if self.app.tool == 'Move':
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.drag_mark=None
         self.drag_stroke=None
         self.resize_signature=None;self.resize_anchor=None
@@ -1567,9 +1588,9 @@ td { padding:7px; border-bottom:1px solid #dae4ee; vertical-align:top; }
 <li>Use the common grey toolbar or the marking tools to work on that active PDF.</li>
 <li>Choose <b>Save</b> or <b>Save As</b> to save marked work to a separate PDF file.</li>
 </ol>
-<p class='note'>The header displays the loaded PDF's filename and folder path. The save status on the right stays blank until a document is loaded; it then shows No changes yet, Unsaved changes or All changes saved. Long file paths may be shortened visually. Clicking the <b>filename</b> opens the PDF selection dialog for replacing that document.</p>
+<p class='note'>The bottom status bar displays the loaded PDF's clickable filename and save status. The save status on the right stays blank until a document is loaded; it then shows No changes yet, Unsaved changes or All changes saved. Long filenames are shortened to fit; hovering shows the complete filename and folder path. Clicking the <b>filename</b> opens the PDF selection dialog for replacing that document.</p>
 <h2>2. Active document and shared grey toolbar</h2>
-<p>The grey toolbar beneath the blue application header is <b>common to both PDF windows</b>. Select the PDF first; then Open, Save, Save As, Image PDF, Undo, Redo, Close, Rotate and Zoom act on <b>that document only</b>. The blue outline shows your selection. In Single View the visible document is active.</p>
+<p>The compact icon-only grey toolbar beneath the light-blue application title bar is <b>common to both PDF windows</b>. Select the PDF first; then Open, Save, Save As, Image PDF, Undo, Redo, Close, Rotate and Zoom act on <b>that document only</b>. The blue outline shows your selection. In Single View the visible document is active.</p>
 <table><tr><th>Control</th><th>How it works</th></tr>
 <tr><td>Open</td><td>Open a PDF in the active document window.</td></tr>
 <tr><td>Save</td><td>On the first save, choose a new destination filename. Later saves reuse that destination.</td></tr>
@@ -1591,11 +1612,12 @@ td { padding:7px; border-bottom:1px solid #dae4ee; vertical-align:top; }
 <li>To show either document by itself, <b>click that document to make it active</b>, then click <b>Single View</b> or press <b>Ctrl+1</b>.</li>
 <li>Choose <b>Split View</b> to return to two documents. Single View and Split View are separate buttons: the button for the current view is disabled.</li>
 </ol>
-<p>Switching views does not discard either PDF's annotations, page position or unsaved work. In Split View, the inactive PDF remains visible while its settings can be displayed over it. Before a PDF is loaded, both view buttons and document-specific controls are disabled; Open and Sign remain available.</p>
+<p><b>Initial viewing size:</b> A PDF opened in Single View uses a 217% initial zoom. In Split View, each newly opened PDF is fitted independently to its document pane width and centred horizontally. The Zoom buttons and Ctrl + mouse wheel can then adjust the active PDF. Switching views or replacing a document should not discard annotations or unsaved work.</p>
+<p>In Split View, the inactive PDF remains visible while its tool settings can be displayed over it. Before a PDF is loaded, both view buttons and document-specific controls are disabled; Open and Sign remain available.</p>
 <h2>4. Vertical marking ribbon: click once or twice</h2>
-<p>The slim, single-column marking ribbon contains vector icons with small labels. <b>Single-click</b> a tool to activate it. <b>Double-click</b> the tool button to open its floating settings panel; double-click the same button again to close it. The settings panel opens beside the clicked button: <b>over the inactive PDF in Split View</b> and <b>to the left of the ribbon in Single View</b>. It does not resize the PDF windows.</p>
+<p>On startup, <b>Select</b> is the active tool. With Select active, drag empty PDF space to pan the document; drag an existing annotation to move it. The slim, single-column marking ribbon contains vector icons with small labels. <b>Single-click</b> a tool to activate it. <b>Double-click</b> the tool button to open its floating settings panel; double-click the same button again to close it. The settings panel opens beside the clicked button: <b>over the inactive PDF in Split View</b> and <b>to the left of the ribbon in Single View</b>. It does not resize the PDF windows.</p>
 <table><tr><th>Tool</th><th>What it does</th></tr>
-<tr><td>Select</td><td>Move supported inserted marks and annotations.</td></tr>
+<tr><td>Select</td><td>Default startup tool. Move inserted marks by dragging them, or drag empty PDF space to pan the document.</td></tr>
 <tr><td>Pen</td><td>Write or draw freehand with a mouse or stylus.</td></tr>
 <tr><td>Highlighter</td><td>Click and drag to draw a <b>straight</b> translucent highlight line over the PDF; width, colour and opacity are configurable.</td></tr>
 <tr><td>Eraser</td><td>Remove inserted marks. Its circle previews eraser size.</td></tr>
@@ -1628,8 +1650,8 @@ td { padding:7px; border-bottom:1px solid #dae4ee; vertical-align:top; }
 <p><b>Image PDF</b> flattens only the active PDF. <b>Combine PDF</b> is available only when both PDFs are loaded and flattens both together (Document 1 pages first, followed by Document 2 pages). Image-only export is not encryption or a tamper-proof digital signature.</p>
 <h2>9. Select or replace a PDF by clicking its filename</h2>
 <ol>
-<li>Open a PDF using <b>Open</b>. The document header then shows its filename and folder path.</li>
-<li><b>Click the filename</b> above the PDF (not the folder path or save-status text). A compact Windows <b>Select replacement PDF</b> file dialog opens in the current PDF's folder.</li>
+<li>Open a PDF using <b>Open</b>. The bottom document status bar then shows its clickable filename.</li>
+<li><b>Click the filename</b> below the PDF (not the folder path or save-status text). A compact Windows <b>Select replacement PDF</b> file dialog opens in the current PDF's folder.</li>
 <li>Browse the local computer, available drive, network location or synced cloud folder. Select a <b>.pdf</b> file and choose <b>Open</b>.</li>
 <li>If the existing PDF has <b>no unsaved changes</b>, confirm <b>Replace</b> or choose <b>Cancel</b>.</li>
 <li>If the existing PDF has <b>unsaved changes</b>, choose <b>Save and Replace</b> (save the current work first), <b>Replace Without Saving</b> (discard unsaved marks), or <b>Cancel</b> (keep the current PDF).</li>
@@ -1640,7 +1662,8 @@ td { padding:7px; border-bottom:1px solid #dae4ee; vertical-align:top; }
 <p>Choose <b>Sign</b> on the grey toolbar to open Signature Manager. Use Upload / Replace to save an image, View to inspect it, Add to PDF to place it, or Delete to remove the stored image. Select/Move can reposition a placed signature; its corner control can resize it. A saved signature can be reused, so protect your computer account. Shortcut: <b>Ctrl+Alt+G</b>.</p>
 <h2>11. Bottom page navigation and page thumbnails</h2>
 <p>In <b>Single View</b>, the <b>Pages</b> button can open or hide a scrollable panel of page thumbnails on the left. Select a thumbnail to jump to that page. The Pages button is grey and unavailable until the displayed PDF has loaded, and remains disabled in Split View.</p>
-<p>Each PDF has its <b>own thin grey navigation bar at the bottom</b>, with centred Previous, page-number and Next controls. Use the controls under the document you want to navigate. Navigating one document does not change the other document's page.</p>
+<p>The separate filename strip and old page-navigation row have been combined into one slim bottom status bar. Each PDF has its own clickable filename, save-status indicator and independent Previous, editable page number and Next controls. Type a page number and press Enter to jump directly to it. Invalid page numbers are not used. In Split View, use the controls under the document you want to navigate; the other PDF stays on its own page.</p>
+<p>Long filenames are shortened automatically with an ellipsis. Hover over the filename to read the full filename and folder path, or click it to choose a replacement PDF. Temporary notification messages are no longer displayed beneath the bottom bar; important warnings and confirmation dialogs still appear.</p>
 <h2>12. Languages and fonts</h2>
 <p>PDF Assignment Marker has been <b>tested for text entry in English, Dhivehi, Arabic and Urdu</b>, including typing direction and text alignment.</p>
 <table><tr><th>Language</th><th>Writing direction</th></tr>
@@ -1662,15 +1685,17 @@ td { padding:7px; border-bottom:1px solid #dae4ee; vertical-align:top; }
 <p><b>Typing behaves unexpectedly:</b> Check the Windows keyboard language and keep the dotted editor active.</p>
 <p><b>Large PDFs:</b> The first page appears quickly; remaining pages load progressively.</p>
 <h2>14. Keyboard shortcuts</h2>
-<p>Shared document shortcuts operate on the PDF with the blue active border. Hover over a ribbon button to see its shortcut where one is assigned.</p>
+<p>Shared document shortcuts operate on the PDF with the blue active border. Click within a document to make it active, then use the shortcuts below. The Up and Down arrow keys scroll a short distance; Page Up and Page Down move one complete PDF page. Ctrl + Page Up goes to the first page, and Ctrl + Page Down goes to the last. These keys are not intercepted while editing text or typing a page number. Hover over an icon-only ribbon button to see its command and shortcut where available.</p>
 <table><tr><th>Function</th><th>Shortcut</th></tr>
 <tr><td>Open / Close active PDF</td><td>Ctrl+O / Ctrl+W</td></tr>
 <tr><td>Save / Save As active PDF</td><td>Ctrl+S / Ctrl+Shift+S</td></tr>
 <tr><td>Undo / Redo in active PDF</td><td>Ctrl+Z / Ctrl+Y</td></tr>
 <tr><td>Image PDF export of active PDF</td><td>Ctrl+Shift+I</td></tr>
 <tr><td>Rotate CW / CCW active PDF</td><td>Ctrl+R / Ctrl+Shift+R</td></tr>
-<tr><td>Zoom In / Out active PDF</td><td>Ctrl+Plus / Ctrl+Minus</td></tr>
-<tr><td>Previous / Next page in active PDF</td><td>Ctrl+PageUp / Ctrl+PageDown</td></tr>
+<tr><td>Zoom In / Out active PDF</td><td>Toolbar Zoom buttons or Ctrl + mouse wheel (not Ctrl + Plus/Minus)</td></tr>
+<tr><td>Previous / Next page in active PDF</td><td>Page Up / Page Down</td></tr>
+<tr><td>First / Last page in active PDF</td><td>Ctrl+Page Up / Ctrl+Page Down</td></tr>
+<tr><td>Scroll a short distance up / down</td><td>Up Arrow / Down Arrow</td></tr>
 <tr><td>Single View / Split View</td><td>Ctrl+1 / Ctrl+Shift+V</td></tr>
 <tr><td>Combine PDF / Sign</td><td>Ctrl+Shift+M / Ctrl+Alt+G</td></tr>
 <tr><td>Help / About</td><td>F1 / Ctrl+Alt+A</td></tr>
@@ -1678,6 +1703,8 @@ td { padding:7px; border-bottom:1px solid #dae4ee; vertical-align:top; }
 <tr><td>Tick / Cross / Line / Arrow</td><td>Alt+5 / Alt+6 / Alt+7 / Alt+8</td></tr>
 <tr><td>Text / Part Marks</td><td>Alt+9 / Alt+0</td></tr>
 <tr><td>Total Marks / Emoji</td><td>Ctrl+Alt+M / Ctrl+Alt+E</td></tr>
+<tr><td>Pen colours: Black / Blue / Red / Green</td><td>Ctrl+Shift+1 / 2 / 3 / 4</td></tr>
+<tr><td>Highlighter colours: Yellow / Green / Pink / Light blue</td><td>Ctrl+Shift+5 / 6 / 7 / 8</td></tr>
 <tr><td>Zoom with mouse</td><td>Ctrl + Mouse Wheel (30–350%)</td></tr>
 <tr><td>Paste into text box</td><td>Ctrl+V or right-click &gt; Paste</td></tr>
 </table>
@@ -1686,7 +1713,7 @@ td { padding:7px; border-bottom:1px solid #dae4ee; vertical-align:top; }
 <li>Save regularly, ideally to distinct output files rather than overwriting originals.</li>
 <li>Reopen an exported PDF to verify the saved result before distributing it.</li>
 <li>PDF Assignment Marker is intended for grading and annotation; it does not provide tamper-proof certification.</li></ul>
-<p class='note'>PDF Assignment Marker — User Guide (updated for active-document and shared-toolbar interface)</p>
+<p class='note'>PDF Assignment Marker — User Guide, version 11.0.2 (compact interface)</p>
 </body></html>
 """
 
@@ -1705,15 +1732,56 @@ class ActivePdfOutline(QWidget):
         painter.drawRect(self.rect().adjusted(1, 1, -2, -2))
         painter.end()
 
+class CompactNotificationBar(QStatusBar):
+    """Retained as an invisible compatibility sink for legacy status messages.
+
+    Feedback must not create a second bar underneath the compact filename and
+    page-navigation row. Existing explicit dialogs still report errors and
+    request confirmation when needed.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setSizeGripEnabled(False)
+        self.setFixedHeight(0)
+        self.hide()
+
+    def showMessage(self, message, timeout=0):
+        # Never show transient messages or consume PDF working space.
+        return
+
 class FileNameLabel(QLabel):
-    """Clickable filename with a subtle link hover effect; no tooltip."""
+    """Clickable filename, automatically middle-elided to the actual label width."""
     clicked = Signal()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._has_document = False
         self._hovering = False
+        self._full_filename = ''
+        self._full_path = ''
         self._update_link_appearance()
+
+    def set_filename(self, filename, full_path=''):
+        """Keep the unabridged name; fit only the display text to available pixels."""
+        self._full_filename = filename
+        self._full_path = full_path
+        self.setToolTip(full_path if full_path and full_path != 'No file loaded' else '')
+        self._fit_filename()
+
+    def _fit_filename(self):
+        if not self._full_filename:
+            return
+        # Width comes from the actual allocated QLabel geometry, AFTER the
+        # save-status and navigation controls have reserved their space.
+        width = max(1, self.contentsRect().width() - 3)
+        shown = self.fontMetrics().elidedText(
+            self._full_filename, Qt.TextElideMode.ElideMiddle, width)
+        if shown != self.text():
+            self.setText(shown)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_filename()
 
     def set_document_available(self, available):
         self._has_document = bool(available)
@@ -1744,13 +1812,86 @@ class FileNameLabel(QLabel):
         else:
             super().mouseReleaseEvent(event)
 
+class CompactBlueTitleBar(QFrame):
+    """Compact, readable blue title area with normal window actions.
+
+    The stock Windows caption cannot have per-app font/icon size changes.
+    This app-owned title bar is isolated to the compact-layout test build.
+    """
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setObjectName('compactBlueTitleBar')
+        self.setFixedHeight(40)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 0, 0)
+        layout.setSpacing(9)
+        icon = QLabel(self)
+        icon.setFixedSize(30, 30)
+        icon.setPixmap(QIcon(app_resource('PDF_Assignment_Marker.ico')).pixmap(QSize(30,30)))
+        icon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(icon)
+        text = QLabel('PDF Assignment Marker', self)
+        text.setObjectName('compactBlueTitleText')
+        text_font = QFont('Segoe UI')
+        # Approved larger, bold application title; filename links have their own smaller font.
+        text_font.setPixelSize(19)
+        text_font.setWeight(QFont.Weight.Bold)
+        text.setFont(text_font)
+        text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(text)
+        layout.addStretch(1)
+
+        for label, hint, callback, key in (
+            ('−','Minimize',window.showMinimized,'min'),
+            ('□','Maximize / Restore',self.toggle_maximize,'max'),
+            ('×','Close',window.close,'close'),
+        ):
+            button = QPushButton(label,self)
+            button.setObjectName('compactTitleClose' if key=='close' else 'compactTitleControl')
+            button.setFixedSize(46,40)
+            button.setToolTip(hint)
+            button.setCursor(Qt.CursorShape.ArrowCursor)
+            button.clicked.connect(callback)
+            if key == 'max':
+                self.maximize_button=button
+            layout.addWidget(button)
+
+    def toggle_maximize(self):
+        if self.window.isMaximized():
+            self.window.showNormal()
+        else:
+            self.window.showMaximized()
+        self.sync_maximize_button()
+
+    def sync_maximize_button(self):
+        if hasattr(self,'maximize_button'):
+            self.maximize_button.setText('❐' if self.window.isMaximized() else '□')
+            self.maximize_button.setToolTip('Restore' if self.window.isMaximized() else 'Maximize')
+
+    def mousePressEvent(self,event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            handle = self.window.windowHandle()
+            if handle is not None and handle.startSystemMove():
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self,event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.toggle_maximize()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
 class App(QMainWindow):
     def __init__(self):
         super().__init__()
         self.folder_settings = QSettings("PDF Assignment Marker", "PDF Assignment Marker UI Trial")
         self.signature_image=str(self.folder_settings.value("signature/png", "") or "")
         self.doc=None;self.path=None;self.page_index=0;self.zoom=1.0;self.student_auto_fit_width=False
-        self.tool='Pen';self.pen_color=INKS[2];self.highlight_color=HIGHLIGHTS[0]
+        self.tool='Move';self.pen_color=INKS[2];self.highlight_color=HIGHLIGHTS[0]
         # Independent colours, scoped to this experimental build.
         self.tool_colors={n: str(self.folder_settings.value('experiment/tool_color/'+n, default))
                           for n,default in {'Pen':INKS[2],'Highlighter':HIGHLIGHTS[0],
@@ -1767,6 +1908,10 @@ class App(QMainWindow):
         self._student_saved_once=False;self._rubric_saved_once=False
         self.rubric_saved_target=None
         self.setWindowTitle('PDF Assignment Marker')
+        # A custom compact title bar permits a larger icon and name without duplication.
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        # Keep the native title bar; Windows 11 can colour it without custom chrome.
+        self._compact_title_colour = '#85B8DF'
         self.setWindowIcon(QIcon(app_resource('PDF_Assignment_Marker.ico')))
         self.resize(1360,860)
         self.setMinimumSize(900,620)  # Windows desktop can be resized normally
@@ -1782,7 +1927,8 @@ class App(QMainWindow):
         self._zoom_preview_pages = {'student': set(), 'rubric': set()}
         self._zoom_settle_timers = {}
         self.make_ui();self.add_keyboard_shortcuts();self.update_actions();self.refresh_page_navigation()
-        self.statusBar().showMessage('Open a PDF to begin marking with a pen, stylus or mouse.')
+        QApplication.instance().installEventFilter(self)
+        self._set_native_title_colour()
         # Prepare the emoji dialog once after the main window appears, so its
         # initial font and icon loading happens before the user opens it.
         QTimer.singleShot(0, self._preload_emoji_palette)
@@ -1790,6 +1936,52 @@ class App(QMainWindow):
         self._heading_status_timer.setInterval(450)
         self._heading_status_timer.timeout.connect(self._refresh_document_statuses)
         self._heading_status_timer.start()
+    def _set_native_title_colour(self):
+        """Colour the Windows 11 native caption; unsupported systems stay native."""
+        if sys.platform != 'win32':
+            return
+        try:
+            hwnd = int(self.winId())
+            blue = ctypes.c_int(0x009F5B07)  # Windows COLORREF BGR for #075B9F
+            white = ctypes.c_int(0x00FFFFFF)
+            dwm = ctypes.windll.dwmapi.DwmSetWindowAttribute
+            dwm(ctypes.c_void_p(hwnd), 35, ctypes.byref(blue), ctypes.sizeof(blue))
+            dwm(ctypes.c_void_p(hwnd), 36, ctypes.byref(white), ctypes.sizeof(white))
+        except (AttributeError, OSError, ValueError):
+            pass
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self,'compact_title_bar'):
+            self.compact_title_bar.sync_maximize_button()
+
+    def nativeEvent(self, event_type, message):
+        # Enable ordinary Windows edge/corner resize even with a custom caption.
+        # Native system move is handled by CompactBlueTitleBar.startSystemMove.
+        if sys.platform == 'win32' and str(event_type) in ('windows_generic_MSG','windows_dispatcher_MSG'):
+            try:
+                import ctypes
+                from ctypes import wintypes
+                msg = wintypes.MSG.from_address(int(message))
+                if msg.message == 0x0084 and not self.isMaximized():  # WM_NCHITTEST
+                    x = ctypes.c_short(msg.lParam & 0xffff).value
+                    y = ctypes.c_short((msg.lParam >> 16) & 0xffff).value
+                    rect = self.frameGeometry()
+                    margin = max(6, round(7 * self.devicePixelRatioF()))
+                    left = x < rect.left() + margin
+                    right = x >= rect.right() - margin
+                    top = y < rect.top() + margin
+                    bottom = y >= rect.bottom() - margin
+                    hit = (13 if top and left else 14 if top and right else
+                           16 if bottom and left else 17 if bottom and right else
+                           12 if top else 15 if bottom else 10 if left else
+                           11 if right else None)
+                    if hit is not None:
+                        return True, hit
+            except (ValueError, OSError, AttributeError, TypeError):
+                pass
+        return super().nativeEvent(event_type, message)
+
     def _preload_emoji_palette(self):
         if not hasattr(self, 'emoji_palette'):
             self.emoji_palette=EmojiPalette(self)
@@ -1809,10 +2001,6 @@ class App(QMainWindow):
             ('Ctrl+Shift+I', self.export_active_image_pdf),
             ('Ctrl+R', self.rotate_active_cw),
             ('Ctrl+Shift+R', self.rotate_active_ccw),
-            ('Ctrl+Plus', self.zoom_active_in),
-            ('Ctrl+Minus', self.zoom_active_out),
-            ('Ctrl+PageUp', lambda: self.navigate_active_pdf(-1)),
-            ('Ctrl+PageDown', lambda: self.navigate_active_pdf(1)),
         ]
         for keys, callback in mappings:
             shortcut = QShortcut(QKeySequence(keys), self)
@@ -1875,8 +2063,8 @@ class App(QMainWindow):
             'Save As': 'Save As (Ctrl+Shift+S)',
             'Undo': 'Undo (Ctrl+Z)',
             'Redo': 'Redo (Ctrl+Y)',
-            '−': 'Zoom Out (Ctrl+Minus)',
-            '+': 'Zoom In (Ctrl+Plus)',
+            '−': 'Zoom Out',
+            '+': 'Zoom In',
         }
         for name, tip in ribbon_tips.items():
             self.shared_header_buttons[name].setToolTip(tip)
@@ -1892,6 +2080,23 @@ class App(QMainWindow):
             (self.header_sign_button, 'Sign'),
         ):
             widget.setToolTip(tip)
+
+    @staticmethod
+    def _utility_icon(kind):
+        """Blue versions of the existing About/Help icons for a pale ribbon."""
+        svg_inner = ("<circle cx='12' cy='12' r='9'/><circle cx='12' cy='7.5' r='1' "
+                     "fill='#0769bc' stroke='none'/><path d='M12 11v6'/>") if kind == 'about' else (
+                     "<circle cx='12' cy='12' r='9'/><path d='M9.4 9a2.7 2.7 0 0 1 5.2 1.1c0 1.8-2.6 2.3-2.6 4'/>"
+                     "<circle cx='12' cy='17.6' r='1' fill='#0769bc' stroke='none'/>")
+        svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+               "<g fill='none' stroke='#0769bc' stroke-width='1.8' stroke-linecap='round' "
+               f"stroke-linejoin='round'>{svg_inner}</g></svg>")
+        pix = QPixmap(24,24)
+        pix.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pix)
+        QSvgRenderer(QByteArray(svg.encode('utf-8'))).render(painter)
+        painter.end()
+        return QIcon(pix)
 
     def make_ui(self):
         base=QWidget();self.setCentralWidget(base)
@@ -1937,13 +2142,17 @@ class App(QMainWindow):
         hl.addWidget(help_button)
         self.header_frame=header
         header.installEventFilter(self)
-        root.addWidget(header)
+        # The redundant 59px blue application banner is intentionally not shown.
+        # The compact 40px light-blue title has a 30px icon and bold 19px name.
+        self.compact_title_bar = CompactBlueTitleBar(self)
+        root.addWidget(self.compact_title_bar)
+
 
         # Compact, grouped hybrid document ribbon.  Commands continue routing
         # through the existing active-document methods; no PDF logic changes.
         document_ribbon=QFrame(objectName='documentRibbon')
         dr=QHBoxLayout(document_ribbon)
-        dr.setContentsMargins(9,5,9,5)
+        dr.setContentsMargins(8,2,8,2)
         dr.setSpacing(2)
         self.shared_header_buttons={}
         self.top_buttons={}
@@ -1953,7 +2162,7 @@ class App(QMainWindow):
             line.setObjectName('ribbonDivider')
             line.setFrameShape(QFrame.Shape.VLine)
             line.setFixedWidth(1)
-            line.setFixedHeight(39)
+            line.setFixedHeight(26)
             dr.addSpacing(5)
             dr.addWidget(line,0,Qt.AlignmentFlag.AlignVCenter)
             dr.addSpacing(5)
@@ -1961,7 +2170,7 @@ class App(QMainWindow):
         def ribbon_button(key, caption, tooltip, callback, icon_name=None, width=59):
             button=QPushButton(document_ribbon)
             button.setObjectName('hybridRibbonButton')
-            button.setFixedSize(width,49)
+            button.setFixedSize(36,34)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setToolTip(tooltip)
             # Render the original SVG paths directly at the display's pixel
@@ -1989,13 +2198,14 @@ class App(QMainWindow):
             # explicit Segoe UI 9 *pixel* font, not points or inherited size.
             picture=QLabel(button)
             picture.setObjectName('hybridRibbonIcon')
-            picture.setGeometry(1,2,width-2,25)
+            picture.setGeometry(1,4,34,26)
             picture.setPixmap(icon_pix)
             picture.setAlignment(Qt.AlignmentFlag.AlignCenter)
             picture.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             caption_label=QLabel(caption,button)
             caption_label.setObjectName('hybridRibbonCaption')
-            caption_label.setGeometry(1,30,width-2,15)
+            caption_label.setGeometry(1,30,34,0)
+            caption_label.hide()  # Hover tooltip supplies its name and shortcut.
             caption_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             caption_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             caption_font=QFont('Segoe UI')
@@ -2081,6 +2291,14 @@ class App(QMainWindow):
         self.header_sign_button=sign_button
         self.top_buttons['Sign']=sign_button
         dr.addStretch(1)
+        for utility, kind in ((self.about_button, 'about'), (self.help_button, 'help')):
+            utility.setParent(document_ribbon)
+            utility.setObjectName('ribbonUtilityButton')
+            utility.setText('')
+            utility.setIcon(self._utility_icon(kind))
+            utility.setIconSize(QSize(19,19))
+            utility.setFixedSize(33,32)
+            dr.addWidget(utility, 0, Qt.AlignmentFlag.AlignVCenter)
         root.addWidget(document_ribbon)
         split=QSplitter(Qt.Orientation.Horizontal);split.setChildrenCollapsible(False)
         split.setHandleWidth(1)  # nearly invisible, non-draggable separator
@@ -2106,8 +2324,8 @@ class App(QMainWindow):
         self._thumb_generation = 0
         self._thumb_cache = {}
         self._thumb_side = None
-        mid=QFrame(objectName='workspace');self.student_workspace=mid;ml=QVBoxLayout(mid);ml.setContentsMargins(12,11,12,11)
-        self.student_title=FileNameLabel('Document 2');self.student_title.setObjectName('sideTitle')
+        mid=QFrame(objectName='workspace');self.student_workspace=mid;ml=QVBoxLayout(mid);ml.setContentsMargins(3,2,3,0)
+        self.student_title=FileNameLabel('Document 2');self.student_title.setObjectName('compactFilenameLink')
         self.student_title.clicked.connect(lambda: self._show_pdf_in_explorer('student'))
         self.student_document_id=QLabel('Document 2')
         self.student_path_label=QLabel('Document 2')
@@ -2163,46 +2381,40 @@ class App(QMainWindow):
         student_controls.addWidget(self.student_close)
         # Old document control row is retired; controls are now in the shared header.
         # Keep the underlying buttons for existing action/state/shortcut logic.
-        # Independent page navigation: never hide access to later pages.
-        student_pages=QHBoxLayout();student_pages.setSpacing(5)
-        self.student_page_previous=QPushButton('◀ Previous')
-        self.student_page_previous.setObjectName('documentFileButton')
-        self.student_page_previous.setFixedWidth(100)
-        self.student_page_previous.setToolTip('Go to the preceding student-paper page')
-        self.student_page_previous.clicked.connect(lambda: self.navigate(-1))
+        # A single compact status strip contains both document identity and navigation.
+        student_nav_bar=QFrame(objectName='compactDocumentStatus')
+        student_nav_bar.setFixedHeight(29)
+        student_nav_bar.setMinimumWidth(0)
+        student_nav_bar.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
+        student_pages=QHBoxLayout(student_nav_bar)
+        student_pages.setContentsMargins(8,1,8,1)
+        student_pages.setSpacing(4)
+        self.student_title.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
+        student_pages.addWidget(self.student_title,1)
+        student_pages.addWidget(self.student_document_id,0)
+        self.student_path_label.hide()
+        self.student_page_previous=QPushButton('◀')
+        self.student_page_previous.setObjectName('compactPageButton')
+        self.student_page_previous.setFixedSize(25,23)
+        self.student_page_previous.setToolTip('Previous page (Page Up)')
+        self.student_page_previous.clicked.connect(lambda:self.navigate(-1))
         student_pages.addWidget(self.student_page_previous)
-        student_page_label=QLabel('Page');student_page_label.setObjectName('pageNavigationText')
-        student_page_center=QWidget()
-        student_page_center.setFixedWidth(154)
-        student_page_center_layout=QHBoxLayout(student_page_center)
-        student_page_center_layout.setContentsMargins(0,0,0,0)
-        student_page_center_layout.setSpacing(0)
-        student_page_center_layout.addStretch(1)
-        student_page_center_layout.addWidget(student_page_label)
-        student_page_center_layout.addStretch(1)
-        self.student_page_number=QLabel('1 / 0')
-        self.student_page_number.setObjectName('pageNavigationText')
-        self.student_page_number.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        self.student_page_number=QLineEdit('0')
+        self.student_page_number.setObjectName('compactPageEdit')
+        self.student_page_number.setFixedSize(38,23)
         self.student_page_number.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        student_page_center_layout.addWidget(self.student_page_number)
-        student_page_center_layout.addStretch(1)
-        student_pages.addWidget(student_page_center)
-        self.student_page_count=QLabel('')
-        self.student_page_next=QPushButton('Next ▶')
-        self.student_page_next.setObjectName('documentFileButton')
-        self.student_page_next.setFixedWidth(100)
-        self.student_page_next.setToolTip('Go to the next student-paper page')
-        self.student_page_next.clicked.connect(lambda: self.navigate(1))
+        self.student_page_number.setToolTip('Type a page number and press Enter')
+        self.student_page_number.returnPressed.connect(lambda:self.jump_to_page_entry('student'))
+        self.student_page_number.editingFinished.connect(lambda:self.restore_page_entry('student'))
+        student_pages.addWidget(self.student_page_number)
+        self.student_page_count=QLabel('/ 0',objectName='pageNavigationText')
+        student_pages.addWidget(self.student_page_count)
+        self.student_page_next=QPushButton('▶')
+        self.student_page_next.setObjectName('compactPageButton')
+        self.student_page_next.setFixedSize(25,23)
+        self.student_page_next.setToolTip('Next page (Page Down)')
+        self.student_page_next.clicked.connect(lambda:self.navigate(1))
         student_pages.addWidget(self.student_page_next)
-        student_pages.insertStretch(0,1)
-        student_pages.addStretch(1)
-        # Bottom navigation bar: reuse the existing controls and their signal connections.
-        student_nav_bar=QFrame()
-        student_nav_bar.setObjectName('bottomPageNavigation')
-        student_nav_bar.setFixedHeight(36)
-        student_nav_bar.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
-        student_nav_bar.setLayout(student_pages)
-        student_pages.setContentsMargins(7,2,7,2)
         self.scroll=QScrollArea();self.scroll.setObjectName('pageArea');self.scroll.setWidgetResizable(False)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -2216,17 +2428,16 @@ class App(QMainWindow):
         self.student_stack_layout.addWidget(self.canvas,0,Qt.AlignmentFlag.AlignHCenter)
         self.scroll.setWidgetResizable(True)
         self.scroll.setWidget(self.student_stack);ml.addWidget(self.scroll)
-        ml.addWidget(student_nav_bar)
         self.scroll.viewport().installEventFilter(self)
         self.scroll.verticalScrollBar().valueChanged.connect(self.sync_student_scroll)
         split.addWidget(mid)
         right=QScrollArea();right.setObjectName('toolsScroll');right.setWidgetResizable(True)
         right.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         right.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # retain wheel scrolling without the dark vertical bar
-        right.setFixedWidth(58)  # one icon per row, Acrobat-style compact strip
+        right.setFixedWidth(44)  # slim 44px tool strip; 36px tool tiles unchanged
         self.marking_tools_panel=right
         right_inner=QFrame(objectName='toolsInner')
-        rl=QVBoxLayout(right_inner);rl.setContentsMargins(7,8,7,8);rl.setSpacing(2)
+        rl=QVBoxLayout(right_inner);rl.setContentsMargins(2,8,2,8);rl.setSpacing(2)
         rl.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self.tool_buttons={};self.highlight_buttons={}
         # Only icons: labels remain available through hover tooltips.  A subtle
@@ -2263,7 +2474,7 @@ class App(QMainWindow):
         self.cross_slider=self.labeled_slider(rl,8,18,14,self.set_cross_size,'px')
         rl.addWidget(QLabel('Emoji Size',objectName='sectionTitle'))
         self.emoji_slider=self.labeled_slider(rl,8,18,14,self.set_emoji_size,'px')
-        self.select_tool('Pen')
+        self.select_tool('Move')
         rl.addWidget(QLabel('Tool Settings',objectName='groupTitle'))
         rl.addWidget(QLabel('Pen Colour',objectName='sectionTitle'))
         inkrow=QHBoxLayout();inkrow.setSpacing(0);self.pen_buttons={}
@@ -2323,8 +2534,8 @@ class App(QMainWindow):
         split.addWidget(right)
         # Hidden independent PDF reference viewer for rubric or marking scheme.
         self.reference_panel=QFrame(objectName='workspace')
-        ref_layout=QVBoxLayout(self.reference_panel);ref_layout.setContentsMargins(6,6,6,6);ref_layout.setSpacing(5)
-        ref_title=FileNameLabel('Document 1');ref_title.setObjectName('sideTitle');self.rubric_title=ref_title
+        ref_layout=QVBoxLayout(self.reference_panel);ref_layout.setContentsMargins(3,2,3,0);ref_layout.setSpacing(0)
+        ref_title=FileNameLabel('Document 1');ref_title.setObjectName('compactFilenameLink');self.rubric_title=ref_title
         ref_title.clicked.connect(lambda: self._show_pdf_in_explorer('rubric'))
         self.rubric_document_id=QLabel('Document 1')
         self.rubric_path_label=QLabel('Document 1')
@@ -2378,44 +2589,39 @@ class App(QMainWindow):
         self.ref_close.clicked.connect(self.close_rubric)
         rubric_controls.addWidget(self.ref_close)
         # Old rubric control row is retired; shared header controls route by active pane.
-        # Rubric navigation is independent of the student document.
-        rubric_pages=QHBoxLayout();rubric_pages.setSpacing(5)
-        self.rubric_page_previous=QPushButton('◀ Previous')
-        self.rubric_page_previous.setObjectName('documentFileButton')
-        self.rubric_page_previous.setFixedWidth(100)
-        self.rubric_page_previous.clicked.connect(lambda: self.navigate_rubric(-1))
+        rubric_nav_bar=QFrame(objectName='compactDocumentStatus')
+        rubric_nav_bar.setFixedHeight(29)
+        rubric_nav_bar.setMinimumWidth(0)
+        rubric_nav_bar.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Fixed)
+        rubric_pages=QHBoxLayout(rubric_nav_bar)
+        rubric_pages.setContentsMargins(8,1,8,1)
+        rubric_pages.setSpacing(4)
+        self.rubric_title.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
+        rubric_pages.addWidget(self.rubric_title,1)
+        rubric_pages.addWidget(self.rubric_document_id,0)
+        self.rubric_path_label.hide()
+        self.rubric_page_previous=QPushButton('◀')
+        self.rubric_page_previous.setObjectName('compactPageButton')
+        self.rubric_page_previous.setFixedSize(25,23)
+        self.rubric_page_previous.setToolTip('Previous page (Page Up)')
+        self.rubric_page_previous.clicked.connect(lambda:self.navigate_rubric(-1))
         rubric_pages.addWidget(self.rubric_page_previous)
-        rubric_page_label=QLabel('Page');rubric_page_label.setObjectName('pageNavigationText')
-        rubric_page_center=QWidget()
-        rubric_page_center.setFixedWidth(154)
-        rubric_page_center_layout=QHBoxLayout(rubric_page_center)
-        rubric_page_center_layout.setContentsMargins(0,0,0,0)
-        rubric_page_center_layout.setSpacing(0)
-        rubric_page_center_layout.addStretch(1)
-        rubric_page_center_layout.addWidget(rubric_page_label)
-        rubric_page_center_layout.addStretch(1)
-        self.rubric_page_number=QLabel('1 / 0')
-        self.rubric_page_number.setObjectName('pageNavigationText')
-        self.rubric_page_number.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        self.rubric_page_number=QLineEdit('0')
+        self.rubric_page_number.setObjectName('compactPageEdit')
+        self.rubric_page_number.setFixedSize(38,23)
         self.rubric_page_number.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        rubric_page_center_layout.addWidget(self.rubric_page_number)
-        rubric_page_center_layout.addStretch(1)
-        rubric_pages.addWidget(rubric_page_center)
-        self.rubric_page_count=QLabel('')
-        self.rubric_page_next=QPushButton('Next ▶')
-        self.rubric_page_next.setObjectName('documentFileButton')
-        self.rubric_page_next.setFixedWidth(100)
-        self.rubric_page_next.clicked.connect(lambda: self.navigate_rubric(1))
+        self.rubric_page_number.setToolTip('Type a page number and press Enter')
+        self.rubric_page_number.returnPressed.connect(lambda:self.jump_to_page_entry('rubric'))
+        self.rubric_page_number.editingFinished.connect(lambda:self.restore_page_entry('rubric'))
+        rubric_pages.addWidget(self.rubric_page_number)
+        self.rubric_page_count=QLabel('/ 0',objectName='pageNavigationText')
+        rubric_pages.addWidget(self.rubric_page_count)
+        self.rubric_page_next=QPushButton('▶')
+        self.rubric_page_next.setObjectName('compactPageButton')
+        self.rubric_page_next.setFixedSize(25,23)
+        self.rubric_page_next.setToolTip('Next page (Page Down)')
+        self.rubric_page_next.clicked.connect(lambda:self.navigate_rubric(1))
         rubric_pages.addWidget(self.rubric_page_next)
-        rubric_pages.insertStretch(0,1)
-        rubric_pages.addStretch(1)
-        # Bottom navigation bar: reuse the existing controls and their signal connections.
-        rubric_nav_bar=QFrame()
-        rubric_nav_bar.setObjectName('bottomPageNavigation')
-        rubric_nav_bar.setFixedHeight(36)
-        rubric_nav_bar.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
-        rubric_nav_bar.setLayout(rubric_pages)
-        rubric_pages.setContentsMargins(7,2,7,2)
         self.ref_scroll=QScrollArea();self.ref_scroll.setObjectName('pageArea');self.ref_scroll.setWidgetResizable(False)
         self.ref_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.ref_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -2445,7 +2651,6 @@ class App(QMainWindow):
             page_stack.setMinimumWidth(0)
             page_stack.setSizePolicy(QSizePolicy.Policy.Ignored,
                                      QSizePolicy.Policy.Preferred)
-        ref_layout.addWidget(rubric_nav_bar)
         self.ref_scroll.viewport().installEventFilter(self)
         self.ref_scroll.verticalScrollBar().valueChanged.connect(self.sync_rubric_scroll)
         split.addWidget(self.reference_panel)
@@ -2454,21 +2659,44 @@ class App(QMainWindow):
         split.insertWidget(2, self.marking_tools_panel)
         self.student_workspace.hide()
         self.reference_panel.show()
-        split.setSizes([0,1015,58,0]);root.addWidget(split,1)
+        split.setSizes([0,1015,44,0]);root.addWidget(split,1)
         self.split=split
+        self.bottom_status_row=QFrame(objectName='compactStatusRow')
+        bottom_layout=QHBoxLayout(self.bottom_status_row)
+        bottom_layout.setContentsMargins(0,0,0,0)
+        bottom_layout.setSpacing(0)
+        self.bottom_thumb_spacer=QWidget()
+        self.bottom_rubric_nav=rubric_nav_bar
+        self.bottom_student_nav=student_nav_bar
+        self.bottom_tools_spacer=QWidget()
+        for widget in (self.bottom_thumb_spacer,self.bottom_rubric_nav,
+                       self.bottom_tools_spacer,self.bottom_student_nav):
+            bottom_layout.addWidget(widget)
+        root.addWidget(self.bottom_status_row)
+        self._sync_bottom_status_layout()
         self.split.splitterMoved.connect(self.on_splitter_moved)
         self._create_active_pdf_borders()
         self._update_document_heading('rubric')
         self._update_document_heading('student')
         self.lock_centre_panel()
         QTimer.singleShot(0, self.position_single_page_ribbon)
-        self.setStatusBar(QStatusBar())
+        self.setStatusBar(CompactNotificationBar(self))
         self.setStyleSheet('''
             QWidget {font-family: 'Segoe UI',Arial; font-size: 12px; color:#102a49;}
             QFrame#header {background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #075294,stop:1 #087ccc);}
             QLabel#brand {font-size:26px;font-weight:700;color:white;}
             QLabel#tagline {color:#e1effd;font-size:12px;}
             QFrame#toolbar {background:#f7f9fc;border-bottom:1px solid #d2dbe7;}
+            QFrame#compactBlueTitleBar {background:#85B8DF;border:0;}
+            QLabel#compactBlueTitleText {color:#173A5A;background:transparent;border:0;font-family:'Segoe UI';font-size:16px;font-weight:400;}
+            QPushButton#compactTitleControl,QPushButton#compactTitleClose {
+                border:none;border-radius:0;background:transparent;color:#173A5A;
+                font-family:'Segoe UI Symbol';font-size:20px;padding:0;
+            }
+            QPushButton#compactTitleControl:hover {background:#72A9D2;}
+            QPushButton#compactTitleClose:hover {background:#d52b36;}
+            QPushButton#compactTitleControl:pressed {background:#3887bf;}
+            QPushButton#compactTitleClose:pressed {background:#ba2031;}
             QFrame#documentRibbon {background:#eef1f4;border-bottom:1px solid #cbd3dc;}
             QPushButton#thumbnailToggle {background:transparent;border:1px solid transparent;border-radius:5px;padding:0;}
             QPushButton#thumbnailToggle:hover:enabled {background:white;border-color:#a7c6e7;}
@@ -2481,11 +2709,17 @@ class App(QMainWindow):
             QLabel#hybridRibbonIcon {background:transparent;border:none;}
             QLabel#hybridRibbonCaption {background:transparent;border:none;color:#174c81;padding:0px;}
             QLabel#ribbonZoomLabel {color:#174c81;font-family:"Segoe UI";font-size:9px;font-weight:400;}
-            QFrame#bottomPageNavigation {background:#eef1f4;border:none;}
-            QLabel#pageNavigationText {color:#104c82;}
+            QFrame#compactStatusRow, QFrame#compactDocumentStatus {background:#eef1f4;border:none;}
+            QPushButton#compactPageButton {background:transparent;border:1px solid #d0d9e5;border-radius:3px;color:#174c81;padding:0;font-size:11px;}
+            QPushButton#compactPageButton:hover:enabled {background:white;border-color:#8bbbea;}
+            QPushButton#compactPageButton:disabled {color:#a5b0bf;}
+            QLineEdit#compactPageEdit {background:white;border:1px solid #bfcfe0;border-radius:3px;color:#174c81;padding:0;font-family:'Segoe UI';font-size:12px;font-weight:400;}
+            QLineEdit#compactPageEdit:disabled {background:#eef1f4;color:#a5b0bf;}
+            QLabel#pageNavigationText {color:#104c82;font-family:'Segoe UI';font-size:12px;font-weight:400;}
+            QLabel#compactFilenameLink {font-family:'Segoe UI';font-size:12px;font-weight:400;color:#397bb3;}
             QToolButton {background:transparent;border:1px solid transparent;border-radius:5px;min-width:54px;padding:4px;}
             QToolButton:hover {background:#e1efff;border-color:#afcef6;}
-            QLabel#sideTitle {font-size:16px;font-weight:400;color:#397bb3;}
+            QLabel#sideTitle {font-family:'Segoe UI';font-size:16px;font-weight:400;color:#397bb3;}
             QLabel#toolButtonLabel {font-size:10px;font-weight:600;color:#0f4592;}
             QPushButton#documentFileButton {padding:3px 5px;min-height:22px;font-size:11px;}
 
@@ -2518,6 +2752,8 @@ class App(QMainWindow):
             QListWidget::item {padding:5px;border:2px solid transparent;border-radius:4px;}
             QListWidget::item:selected {border:2px solid #1684e8;background:#e6f2ff;color:#0058a7;}
             QPushButton#headerInfoButton {background:transparent;border:1px solid transparent;border-radius:5px;color:white;font-family:'Segoe UI';font-size:13px;font-weight:400;padding:3px 5px;text-align:center;}
+            QPushButton#ribbonUtilityButton {background:transparent;border:1px solid transparent;border-radius:5px;padding:0;}
+            QPushButton#ribbonUtilityButton:hover {background:white;border-color:#a7c6e7;}
             QPushButton#headerInfoButton:hover {background:rgba(255,255,255,0.15);border-color:rgba(255,255,255,0.22);}
             QPushButton#headerInfoButton:pressed {background:rgba(255,255,255,0.23);}
             QFrame#headerInfoDivider {background:rgba(255,255,255,0.5);border:none;}
@@ -2609,6 +2845,19 @@ class App(QMainWindow):
             self.navigate_rubric(offset)
         else:
             self.navigate(offset)
+
+    def jump_active_pdf_to_end(self, last=False):
+        """Jump to the first or last page of the selected PDF."""
+        if self._shared_on_rubric():
+            if self.rubric_doc is None or len(self.rubric_doc) == 0:
+                return
+            self.ref_image.finish_editor()
+            self.rubric_page = len(self.rubric_doc) - 1 if last else 0
+            self.jump_to_rubric_page()
+        else:
+            if self.doc is None or len(self.doc) == 0:
+                return
+            self.go_page(len(self.doc) - 1 if last else 0)
 
     def open_active_pdf(self):
         if self._shared_on_rubric(): self.open_rubric()
@@ -2812,10 +3061,10 @@ class App(QMainWindow):
         first.setContentsMargins(0,0,0,0)
         first.setSpacing(8)
         # Match the tool ribbon's Segoe UI / regular style, while retaining
-        # the document filename's already-approved 16 px title size.
+        # the compact bottom filename's 12 px font size.
         title_font = QFont('Segoe UI')
         title_font.setBold(False)
-        title_font.setPixelSize(16)
+        title_font.setPixelSize(12)
         filename_label.setFont(title_font)
         filename_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         filename_label.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Preferred)
@@ -2840,7 +3089,7 @@ class App(QMainWindow):
         path_label.setMinimumWidth(0)
         path_label.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Preferred)
         heading.addWidget(path_label)
-        layout.addLayout(heading)
+        # In compact mode, these existing widgets move into the bottom bar.
 
     def _update_document_heading(self, side):
         if side == 'rubric':
@@ -2866,14 +3115,13 @@ class App(QMainWindow):
             folder=os.path.dirname(full)
             state='Unsaved changes' if changed else ('All changes saved' if saved else 'No changes yet')
         status.setText(state)
-        # Header text is display-only: no hover tooltips or path popups.
+        # The filename QLabel now fits its own actual layout width, not the
+        # workspace width. Long names shorten on resizing, in both view modes.
         status.setToolTip('')
-        filename.setToolTip('')
         filename.set_document_available(bool(is_loaded and path))
+        filename.set_filename(filename_text, full if is_loaded and path else '')
         path_label.setToolTip('')
-        reserve=status.sizeHint().width()+32
-        filename.setText(filename.fontMetrics().elidedText(filename_text,Qt.TextElideMode.ElideMiddle,max(75,host.width()-reserve)))
-        path_label.setText(path_label.fontMetrics().elidedText(folder,Qt.TextElideMode.ElideMiddle,max(75,host.width()-30)))
+        path_label.setText(folder)  # Internal compatibility; hidden in compact UI.
 
     def _refresh_document_statuses(self):
         for side, state in (('rubric', (self.rubric_dirty,self._rubric_saved_once,self.rubric_path)),
@@ -2919,6 +3167,35 @@ class App(QMainWindow):
         self._refresh_shared_header()
 
     def eventFilter(self, watched, event):
+        # Page Up/Down move one page; Ctrl+Page Up/Down go to first/last.
+        # Up/Down arrow keys scroll the selected PDF by a small amount.
+        # Never capture these keys while a text or numeric input is being edited.
+        if event.type() == QEvent.Type.KeyPress and self.isActiveWindow():
+            focused = QApplication.focusWidget()
+            editing = isinstance(focused, (QLineEdit, QTextEdit, QPlainTextEdit,
+                                           QAbstractSpinBox, QComboBox))
+            if not editing:
+                key = event.key()
+                modifiers = event.modifiers()
+                side = self._active_pdf_side
+                loaded = self.rubric_doc if side == 'rubric' else self.doc
+                if loaded is not None and key in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
+                    if modifiers == Qt.KeyboardModifier.ControlModifier:
+                        self.jump_active_pdf_to_end(last=(key == Qt.Key.Key_PageDown))
+                        event.accept()
+                        return True
+                    if modifiers == Qt.KeyboardModifier.NoModifier:
+                        self.navigate_active_pdf(-1 if key == Qt.Key.Key_PageUp else 1)
+                        event.accept()
+                        return True
+                if loaded is not None and modifiers == Qt.KeyboardModifier.NoModifier:
+                    if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                        scroll = self.ref_scroll if side == 'rubric' else self.scroll
+                        bar = scroll.verticalScrollBar()
+                        step = max(32, bar.singleStep() * 2)
+                        bar.setValue(bar.value() + (-step if key == Qt.Key.Key_Up else step))
+                        event.accept()
+                        return True
         if (event.type() == QEvent.Type.Resize and
                 watched in (getattr(self, 'student_workspace', None),
                             getattr(self, 'reference_panel', None))):
@@ -3170,7 +3447,7 @@ class App(QMainWindow):
         note.setWordWrap(True)
         text_layout.addWidget(note)
         text_layout.addStretch(1)
-        meta = QLabel('Version 11.0.1  •  2026  •  Mohamed Jameel')
+        meta = QLabel('Version 11.0.2  •  2026  •  Mohamed Jameel')
         meta.setObjectName('aboutMeta')
         text_layout.addWidget(meta)
         area.setWidget(content)
@@ -3699,9 +3976,9 @@ class App(QMainWindow):
         for n,b in self.tool_buttons.items():b.setChecked(n==name)
         self.update_tool_icons()
         self.canvas.update()
-        self.canvas.setCursor(Qt.CursorShape.ArrowCursor if name=='Move' else Qt.CursorShape.CrossCursor)
+        self.canvas.setCursor(Qt.CursorShape.OpenHandCursor if name=='Move' else Qt.CursorShape.CrossCursor)
         if hasattr(self,'ref_image'):
-            self.ref_image.setCursor(Qt.CursorShape.ArrowCursor if name=='Move' else Qt.CursorShape.CrossCursor)
+            self.ref_image.setCursor(Qt.CursorShape.OpenHandCursor if name=='Move' else Qt.CursorShape.CrossCursor)
         if name != 'Eraser' and hasattr(self,'ref_image'):
             self.ref_image.eraser_hover=None
             self.ref_image.update()
@@ -3825,7 +4102,8 @@ class App(QMainWindow):
     def set_dirty(self,value):
         self.update_marks_total()
         self.dirty=value
-        self.setWindowTitle(('● ' if value else '')+'PDF Assignment Marker'+(' — '+os.path.basename(self.path) if self.path else ''))
+        # Keep the Windows title bar clean; PDF name and save state live in the bottom bar.
+        self.setWindowTitle('PDF Assignment Marker')
     def _confirm_discard_changes(self, side):
         dirty = self.rubric_dirty if side == 'rubric' else self.dirty
         if not dirty:
@@ -3858,6 +4136,57 @@ class App(QMainWindow):
             self.split.setStretchFactor(2, 0)
             self.split.setStretchFactor(3, 0)
 
+    def _sync_bottom_status_layout(self):
+        """Align each document's one-line status with its corresponding PDF pane."""
+        if not hasattr(self, 'bottom_status_row'):
+            return
+        thumbs = self.pages_panel if getattr(self, '_thumbnails_open', False) else None
+        thumb_w = thumbs.width() if thumbs and thumbs.isVisible() else 0
+        tools_w = self.marking_tools_panel.width()
+        self.bottom_thumb_spacer.setFixedWidth(thumb_w)
+        self.bottom_tools_spacer.setFixedWidth(tools_w)
+        # Reorder the single visible document before the marking ribbon.
+        bar_layout = self.bottom_status_row.layout()
+        first_doc = (self.bottom_rubric_nav if self.split_mode or
+                     self._active_pdf_side == 'rubric' else self.bottom_student_nav)
+        bar_layout.removeWidget(first_doc)
+        bar_layout.insertWidget(1, first_doc)
+        if self.split_mode:
+            self.bottom_rubric_nav.show()
+            self.bottom_student_nav.show()
+            self.bottom_rubric_nav.setFixedWidth(max(1,self.reference_panel.width()))
+            self.bottom_student_nav.setFixedWidth(max(1,self.student_workspace.width()))
+        else:
+            show_student = self._active_pdf_side == 'student'
+            self.bottom_student_nav.setVisible(show_student)
+            self.bottom_rubric_nav.setVisible(not show_student)
+            shown = self.bottom_student_nav if show_student else self.bottom_rubric_nav
+            shown.setFixedWidth(max(1, self.student_workspace.width() if show_student else self.reference_panel.width()))
+
+    def restore_page_entry(self, side):
+        """Restore an invalid or abandoned navigation entry."""
+        field = self.rubric_page_number if side == 'rubric' else self.student_page_number
+        if not field.hasFocus():
+            self.refresh_page_navigation()
+
+    def jump_to_page_entry(self, side):
+        """Navigate to an explicitly entered 1-based page number."""
+        field = self.rubric_page_number if side == 'rubric' else self.student_page_number
+        doc = self.rubric_doc if side == 'rubric' else self.doc
+        try:
+            target = int(field.text().strip())
+        except ValueError:
+            target = -1
+        if doc and 1 <= target <= len(doc):
+            if side == 'rubric':
+                self.rubric_page_selected(target)
+            else:
+                self.go_page(target-1)
+        else:
+            self.refresh_page_navigation()
+        field.clearFocus()
+        self.refresh_page_navigation()
+
     def position_single_page_ribbon(self):
         """Keep the fixed-width marking ribbon at the far-right of single view."""
         if not hasattr(self, 'split') or self.split_mode:
@@ -3869,6 +4198,7 @@ class App(QMainWindow):
         thumb_width = self.pages_panel.width() if getattr(self, '_thumbnails_open', False) else 0
         page_width = max(0, available - thumb_width - width - (2 if thumb_width else 1)*self.split.handleWidth())
         self.split.setSizes([thumb_width, page_width, width, 0])
+        self._sync_bottom_status_layout()
 
     def center_tools_panel(self):
         """Keep the fixed-width tool column exactly between equal document panes."""
@@ -3879,6 +4209,7 @@ class App(QMainWindow):
         handle_space = self.split.handleWidth() * 2
         side = max(0, (available - centre - handle_space) // 2)
         self.split.setSizes([0, side, centre, side])
+        self._sync_bottom_status_layout()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -3887,15 +4218,63 @@ class App(QMainWindow):
         else:
             QTimer.singleShot(0, self.position_single_page_ribbon)
 
+    def _schedule_split_width_fit(self):
+        """Coalesce Split View fit until Qt finishes sizing both PDF viewports.
+
+        Running fit in the same event-loop turn as QSplitter.setSizes() can
+        measure the previous (Single View) viewport width. A short single-shot
+        delay reads the final geometry and does not rebuild the PDF stacks.
+        """
+        if not self.split_mode or not (self.doc or self.rubric_doc):
+            return
+        timer = getattr(self, '_split_fit_timer', None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._apply_split_width_fit)
+            self._split_fit_timer = timer
+        timer.start(90)
+
+    def _apply_split_width_fit(self):
+        if not self.split_mode:
+            return
+        # Only fit once both pane viewports have their real, visible widths.
+        for pdf, area in ((self.doc, self.scroll),
+                          (self.rubric_doc, self.ref_scroll)):
+            if pdf is not None and (not area.isVisible() or area.viewport().width() < 120):
+                self._schedule_split_width_fit()
+                return
+        self.set_shared_initial_zoom()
+        # Split View should start with the PDF centred in each document pane.
+        # Defer until zoomed page and scrollbar geometries have settled.
+        QTimer.singleShot(0, self._center_split_pdf_pages)
+
+    def _center_split_pdf_pages(self):
+        """Centre each PDF horizontally after a Split View fit.
+
+        The outer scroll areas already use AlignHCenter, and each page widget
+        is aligned in its vertical stack. Centre the horizontal scroll range
+        too: a previous 217% Single View can leave it at the former offset.
+        This runs only after a view transition, not during user panning.
+        """
+        if not self.split_mode:
+            return
+        for doc, area in ((self.rubric_doc, self.ref_scroll),
+                          (self.doc, self.scroll)):
+            if doc is None or not area.isVisible():
+                continue
+            area.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+            bar = area.horizontalScrollBar()
+            # Usually zero after fit-to-width; for mixed-width PDF pages,
+            # centre the oversize page instead of anchoring it to the left.
+            bar.setValue((bar.minimum() + bar.maximum()) // 2)
+
     def on_splitter_moved(self, pos, index):
-        """Keep both PDF page views fitted after users drag a divider."""
-        if self.split_mode and self.rubric_doc:
-            self.render_rubric()
-        if self.doc:
-            if self.student_auto_fit_width:
-                self.fit_width()
-            else:
-                self.render()
+        """Fit after Split View's viewport geometries stabilise."""
+        if self.split_mode and (self.rubric_doc or self.doc):
+            self._schedule_split_width_fit()
+        elif self.doc and self.student_auto_fit_width:
+            self.fit_width()
 
     def _set_thumbnail_toggle_enabled(self, enabled):
         """Match the approved ribbon; grey out icon and caption when unavailable."""
@@ -3915,6 +4294,8 @@ class App(QMainWindow):
         self.canvas.finish_editor()
         self.ref_image.finish_editor()
         self.split_mode = False
+        if getattr(self, '_split_fit_timer', None) is not None:
+            self._split_fit_timer.stop()
         self._set_thumbnail_toggle_enabled(
             self.rubric_doc is not None if self._active_pdf_side == 'rubric' else self.doc is not None
         )
@@ -3924,14 +4305,15 @@ class App(QMainWindow):
         if show_student:
             self.split.insertWidget(1, self.student_workspace)
             self.split.insertWidget(2, self.marking_tools_panel)
-            self.split.setSizes([0, 1100, 58, 0])
+            self.split.setSizes([0, 1100, 44, 0])
         else:
             self.split.insertWidget(1, self.reference_panel)
             self.split.insertWidget(2, self.marking_tools_panel)
-            self.split.setSizes([0, 1100, 58, 0])
+            self.split.setSizes([0, 1100, 44, 0])
         self.lock_centre_panel()
         QTimer.singleShot(0, self.position_single_page_ribbon)
         QTimer.singleShot(0, self._refresh_active_pdf_borders)
+        QTimer.singleShot(0, self._sync_bottom_status_layout)
         QTimer.singleShot(0, self._refresh_shared_header)
         if self.doc or self.rubric_doc:
             QTimer.singleShot(0, self.set_shared_initial_zoom)
@@ -3952,13 +4334,16 @@ class App(QMainWindow):
         self.split.insertWidget(1, self.reference_panel)
         self.split.insertWidget(2, self.marking_tools_panel)
         self.split.insertWidget(3, self.student_workspace)
-        self.split.setSizes([0, 560, 58, 560])
+        self.split.setSizes([0, 560, 44, 560])
         self.lock_centre_panel()
         QTimer.singleShot(0, self.center_tools_panel)
         QTimer.singleShot(0, self._refresh_active_pdf_borders)
+        QTimer.singleShot(0, self._sync_bottom_status_layout)
         QTimer.singleShot(0, self._refresh_shared_header)
         if self.doc or self.rubric_doc:
-            QTimer.singleShot(0, self.set_shared_initial_zoom)
+            # Fit AFTER both viewports reach their final Split View widths.
+            # Keep the existing page images visible until the new scale is ready.
+            self._schedule_split_width_fit()
 
     def toggle_split_view(self):
         """Compatibility shim for existing toggle callers."""
@@ -4006,7 +4391,11 @@ class App(QMainWindow):
         self.rubric_pages=[]
         self.update_actions()
         # Initial zoom does the rendering; don't build the same page stack twice.
+        # When Split View is already open, its pane size may still be changing.
+        # Apply a bounded initial fit, then settle/centre after the new stack loads.
         QTimer.singleShot(0, self.set_shared_initial_zoom)
+        if self.split_mode:
+            self._schedule_split_width_fit()
 
     def close_rubric(self):
         if self.rubric_doc is not None:
@@ -4038,8 +4427,14 @@ class App(QMainWindow):
     def refresh_page_navigation(self):
         student_total=len(self.doc) if self.doc else 0
         rubric_total=len(self.rubric_doc) if self.rubric_doc else 0
-        self.student_page_number.setText(f'{self.page_index+1} / {student_total}' if student_total else '0 / 0')
-        self.rubric_page_number.setText(f'{self.rubric_page+1} / {rubric_total}' if rubric_total else '0 / 0')
+        if not self.student_page_number.hasFocus():
+            self.student_page_number.setText(str(self.page_index+1) if student_total else '0')
+        if not self.rubric_page_number.hasFocus():
+            self.rubric_page_number.setText(str(self.rubric_page+1) if rubric_total else '0')
+        self.student_page_count.setText(f'/ {student_total}')
+        self.rubric_page_count.setText(f'/ {rubric_total}')
+        self.student_page_number.setEnabled(student_total > 0)
+        self.rubric_page_number.setEnabled(rubric_total > 0)
         self.student_page_previous.setEnabled(student_total>0 and self.page_index>0)
         self.student_page_next.setEnabled(student_total>0 and self.page_index<student_total-1)
         self.rubric_page_previous.setEnabled(rubric_total>0 and self.rubric_page>0)
@@ -4223,7 +4618,12 @@ class App(QMainWindow):
         old_fraction = ((old_scroll - old_page.y()) /
                         max(1, old_page.height()))
         visible_before = set(self._visible_pdf_pages(scroll, pages))
-        keep = visible_before | {anchor, active_index}
+        # Preserve images that are already cached, including pages that may
+        # enter the viewport after the pane is resized. This avoids gaps in
+        # the initial Single -> Split transition.
+        cached = {i for i, canvas in enumerate(pages)
+                  if not (canvas.pixmap().isNull() if rubric else canvas.paper.isNull())}
+        keep = visible_before | {anchor, active_index} | cached
         self._cancel_background_render(side)
         generation = self._render_generation[side]
         self._zoom_preview_pages[side].clear()
@@ -4261,6 +4661,13 @@ class App(QMainWindow):
             page = pages[anchor]
             new_scroll = page.y() + round(old_fraction * page.height())
             scroll.verticalScrollBar().setValue(max(0, new_scroll))
+            # Render any newly visible uncached pages at the new scale before
+            # releasing the redraw lock. Background prefetch still handles
+            # neighbouring pages once the zoom settles.
+            if rubric:
+                self._render_visible_rubric_pages()
+            else:
+                self._render_visible_student_pages()
         finally:
             stack.setUpdatesEnabled(True)
             scroll.setUpdatesEnabled(True)
@@ -4849,6 +5256,10 @@ class App(QMainWindow):
         self._clear_page_stack(self.student_stack_layout)
         self.student_pages=[]
         self.refresh_thumbs();self.set_shared_initial_zoom();self.update_actions()
+        # Opening/replacing a PDF while already split must fit and centre it too,
+        # not only when the user first clicks the Split View button.
+        if self.split_mode:
+            self._schedule_split_width_fit()
         self.statusBar().showMessage('Draw with your stylus or mouse. Save updates the opened PDF; Save As makes a separate copy.')
     def close_student_pdf(self):
         """Close only the student PDF; the rubric and its marks are unaffected."""
@@ -5043,31 +5454,65 @@ class App(QMainWindow):
             QTimer.singleShot(0,self._render_visible_student_pages)
         self.refresh_page_navigation()
     def navigate(self,d):self.go_page(self.page_index+d)
+    def _stable_split_fit_width(self, side):
+        """Available PDF width, bounded by the actual Split View workspace.
+
+        During PDF replacement the inner page stack can momentarily keep a
+        stale, very large width. Never use that width as a zoom target; the
+        outer QSplitter pane provides the real physical limit.
+        """
+        if side == 'rubric':
+            pane, area, gutter = self.reference_panel, self.ref_scroll, 38
+        else:
+            pane, area, gutter = self.student_workspace, self.scroll, 24
+        pane_width = pane.width()
+        viewport_width = area.viewport().width()
+        # Split panes are guaranteed visible while this calculation is used.
+        # A temporarily large viewport must not force 350% zoom.
+        return max(60, min(viewport_width, max(120, pane_width - 24)) - gutter)
+
     def set_shared_initial_zoom(self):
-        """Use one visible initial zoom percentage that fits every open PDF pane."""
-        candidates=[]
-        if self.doc and self.split_mode:
-            page=self.doc[self.page_index]
-            candidates.append((self.scroll.viewport().width()-38)/max(1, page.rect.width))
-        if self.rubric_doc:
-            page=self.rubric_doc[self.rubric_page]
-            candidates.append((self.ref_scroll.viewport().width()-38)/max(1, page.rect.width))
-        if not candidates:
+        """Default opening zoom: 217% in Single View, page width in Split View.
+
+        Only initial opening/view-mode switching calls this routine. Normal
+        toolbar, Ctrl+wheel and per-document scrolling remain unchanged.
+        """
+        if not (self.doc or self.rubric_doc):
             return
-        common=max(0.3, min(3.50, *candidates))
-        self.student_auto_fit_width=False
-        self.ref_auto_fit=False
-        if self.doc:
-            if not self.student_pages or abs(self.zoom-common)>0.001:
-                self.set_zoom(common)
-            else:
-                self.student_zoom_label.setText(f'{round(self.zoom*100)}%');self._refresh_shared_header()
-        if self.rubric_doc:
-            if not self.rubric_pages or abs(self.ref_zoom-common)>0.001:
-                self.ref_zoom=common
-                self.render_rubric()
-            else:
-                self.ref_zoom_label.setText(f'{round(self.ref_zoom*100)}%');self._refresh_shared_header()
+        if self.split_mode:
+            # Derive each fit from its own viewport, never the other pane.
+            # Use the actual PDF page width, with a little room for gutters.
+            if self.doc:
+                page = self.doc[self.page_index]
+                width = self._stable_split_fit_width('student')
+                student_scale = max(.30, min(3.50, width / max(1.0, page.rect.width)))
+                self.student_auto_fit_width = False
+                if not self.student_pages or abs(self.zoom - student_scale) > .001:
+                    self.set_zoom(student_scale)
+            if self.rubric_doc:
+                page = self.rubric_doc[self.rubric_page]
+                width = self._stable_split_fit_width('rubric')
+                rubric_scale = max(.30, min(3.50, width / max(1.0, page.rect.width)))
+                self.ref_auto_fit = False
+                if not self.rubric_pages or abs(self.ref_zoom - rubric_scale) > .001:
+                    self.ref_zoom = rubric_scale
+                    if not self._zoom_existing_pages('rubric'):
+                        self.render_rubric()
+                    self.ref_zoom_label.setText(f'{round(self.ref_zoom*100)}%')
+        else:
+            default_scale = 2.17
+            if self.doc:
+                self.student_auto_fit_width = False
+                if not self.student_pages or abs(self.zoom - default_scale) > .001:
+                    self.set_zoom(default_scale)
+            if self.rubric_doc:
+                self.ref_auto_fit = False
+                if not self.rubric_pages or abs(self.ref_zoom - default_scale) > .001:
+                    self.ref_zoom = default_scale
+                    if not self._zoom_existing_pages('rubric'):
+                        self.render_rubric()
+                    self.ref_zoom_label.setText(f'{round(self.ref_zoom*100)}%')
+        self._refresh_shared_header()
 
     def scale_zoom(self,factor):self.set_zoom(self.zoom*factor)
     def set_zoom(self,z,auto_fit=False):
