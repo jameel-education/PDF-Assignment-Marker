@@ -1,4 +1,4 @@
-# PDF Assignment Marker v11.0.2 - Maintenance Update
+# PDF Assignment Marker v11.0.2 - Compact Interface Update
 
 ## What's New in v11.0.2
 
