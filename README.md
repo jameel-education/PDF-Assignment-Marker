@@ -1,10 +1,17 @@
-# PDF Assignment Marker v11.0.2 - Compact Interface Update
+# PDF Assignment Marker v11.1.1 
 
-## What's New in v11.0.2
+## What's New in v11.1.1— Text Selection, Copy Tool & Keyboard Shortcuts (2026)
 
-Version 11.0.2 introduces a compact, laptop-friendly interface with a Light Blue title bar, streamlined toolbars, more PDF viewing space, improved page navigation, and enhanced Single View and Split View handling.
+Version 11.1.1 introduces text selection and copying improvements, allowing users to copy text from supported PDF documents and paste it into other applications. It also introduces keyboard shortcuts for selected tools and menu commands to improve marking efficiency.
 
-All existing PDF marking tools and features are retained.
+### PDF Assignment Marker v11.1.0 — Interface and Annotation Improvements (2026)
+
+- introduces improvements to the application interface, including a redesigned header and floating toolbox, additional annotation symbols, and more convenient colour and opacity controls.
+
+### PDF Assignment Marker v11.0.2 
+- introduces a compact, laptop-friendly interface with a Light Blue title bar, streamlined toolbars, more PDF viewing space, improved page navigation, and enhanced Single View and Split View handling.
+
+### All existing PDF marking tools and features are retained.
 
 This release corrects PDF display, zooming, horizontal scrolling, and page rotation issues without introducing new features.
 
@@ -55,7 +62,18 @@ Windows 10 (64-bit) is expected to be compatible but has not yet been tested.
 These results reflect development and release testing and do not constitute certification for every Windows computer or configuration.
 
 ## Download the latest release:
-https://github.com/jameel-education/PDF-Assignment-Marker/releases/tag/v11.0.2
+
+Download the latest version of PDF Assignment Marker for Windows:
+
+https://github.com/jameel-education/PDF-Assignment-Marker/releases/latest
+
+Two Windows packages are available:
+
+Windows Installer (.exe): Recommended for normal installation.
+
+Windows Portable (.zip): Extract and run without installation.
+
+A SHA256SUMS.txt file is provided to verify download integrity.
 
 Bug reports and community contributions are welcome through GitHub Issues.
 
@@ -66,7 +84,7 @@ Install Python 3.11+ and run:
 ```bat
 py -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe source\pdf_assignment_marker.py
+.venv\Scripts\python.exe Source\PDF_Assignment_Marker.py
 ```
 
 Optional English spellchecking uses pyspellchecker and its word list. The app still opens if the dictionary is unavailable.
