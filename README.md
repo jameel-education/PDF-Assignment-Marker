@@ -1,4 +1,24 @@
-# PDF Assignment Marker v11.1.1 
+# PDF Assignment Marker v11.1.2
+
+## What's New in v11.1.2 — Enhanced Text Formatting and Multilingual Support (2026)
+
+Version 11.1.2 introduces significant improvements to text annotations, font management and multilingual support, providing greater flexibility for teachers when marking PDF assignments.
+
+- Expanded font size range from 5 to 36 px for Text, Part Marks and Total Marks.
+- Font selection from installed Windows system fonts.
+- Language-specific font preference remembrance.
+- Automatic remembrance of font size and colour preferences.
+- Live font, size and colour adjustment without closing the active text box.
+- Automatic cursor positioning when switching between LTR and RTL languages.
+- Resizable text boxes with automatic text wrapping.
+- Automatic display of the selected annotation's font and font size.
+- Consistent formatting behaviour across both panes in Split View.
+- Improved text box rendering without duplicate text or outlines.
+- Updated built-in Help and User Guide.
+
+All existing default settings, annotation tools and automatic marks calculations have been preserved.
+
+Available as a Windows installer, a portable ZIP package and through Microsoft Store following Store approval.
 
 ## What's New in v11.1.1— Text Selection, Copy Tool & Keyboard Shortcuts (2026)
 
