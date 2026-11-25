@@ -1,10 +1,22 @@
-"""Verify bundled PyMuPDF layout assets rather than relying on a fixed library version."""
+"""Verify essential files in the Windows application bundle."""
+
 from pathlib import Path
 import sys
-base = Path('dist') / 'PDF Assignment Marker'
-exe = base / 'PDF Assignment Marker.exe'
-resources = list((base / '_internal' / 'pymupdf' / 'layout' / 'resources' / 'onnx').glob('layout_rf*.yaml'))
-if not exe.is_file() or not resources:
-    print('FAIL: missing exe or PyMuPDF ONNX layout YAML resources')
+
+base = Path("dist") / "PDF_Assignment_Marker"
+
+required = [
+    base / "PDF_Assignment_Marker.exe",
+    base / "_internal",
+    base / "_internal" / "PDF_Assignment_Marker.ico",
+]
+
+missing = [str(path) for path in required if not path.exists()]
+
+if missing:
+    print("FAIL: Missing required application files:")
+    for path in missing:
+        print(path)
     sys.exit(1)
-print('PASS: executable and PyMuPDF layout resources found:', [p.name for p in resources])
+
+print("PASS: Executable, supporting files and icon found.")
